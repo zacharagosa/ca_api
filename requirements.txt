@@ -1,0 +1,6 @@
+google-cloud-aiplatform[adk,agent_engines]
+google-cloud-geminidataanalytics
+google-auth
+google-adk
+flask
+flask-cors
