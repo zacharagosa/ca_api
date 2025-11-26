@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Bot, User, Loader2, Code, X } from 'lucide-react'
+import { Send, Bot, User, Loader2, Code, X, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
@@ -74,6 +74,68 @@ const ChartRenderer = ({ config }) => {
   );
 };
 
+const MetadataAccordion = ({ metadata }) => {
+  const [isOpen, setIsOpen] = useState(false);
+
+  if (!metadata) return null;
+
+  return (
+    <div className="metadata-accordion">
+      <button
+        type="button"
+        className="metadata-header"
+        onClick={(e) => {
+          e.preventDefault();
+          setIsOpen(!isOpen);
+        }}
+      >
+        <span>Query Details</span>
+        {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+      </button>
+
+      {isOpen && (
+        <div className="metadata-content">
+          {metadata.filters && Object.keys(metadata.filters).length > 0 && (
+            <div className="metadata-section">
+              <h4>Filters</h4>
+              <ul>
+                {Object.entries(metadata.filters).map(([key, value]) => (
+                  <li key={key}>
+                    <span className="metadata-key">{key}:</span> {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {metadata.sorts && metadata.sorts.length > 0 && (
+            <div className="metadata-section">
+              <h4>Sorts</h4>
+              <ul>
+                {metadata.sorts.map((sort, i) => (
+                  <li key={i}>{typeof sort === 'object' ? JSON.stringify(sort) : String(sort)}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {metadata.fields && metadata.fields.length > 0 && (
+            <div className="metadata-section">
+              <h4>Fields</h4>
+              <div className="fields-list">
+                {metadata.fields.map((field, i) => {
+                  const fieldName = typeof field === 'object' ? (field.name || JSON.stringify(field)) : String(field);
+                  return <span key={i} className="field-chip">{fieldName}</span>
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 function App() {
   const [messages, setMessages] = useState([
     { role: 'agent', content: 'Hello! I am your mobile gaming data analyst. How can I help you today?' }
@@ -125,8 +187,8 @@ function App() {
     setLastResponse(null)
 
     try {
-      console.log('Fetching from http://127.0.0.1:5000/chat...')
-      const response = await fetch('http://127.0.0.1:5000/chat', {
+      console.log('Fetching from http://127.0.0.1:5001/chat...')
+      const response = await fetch('http://127.0.0.1:5001/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -189,6 +251,29 @@ function App() {
               const lastMsg = newMessages[newMessages.length - 1]
               if (lastMsg.role === 'agent') {
                 lastMsg.content = fullResponse
+              }
+              return newMessages
+            })
+          } else if (line.startsWith('LINK: ')) {
+            const link = line.substring(6)
+            setMessages(prev => {
+              const newMessages = [...prev]
+              const lastMsg = newMessages[newMessages.length - 1]
+              if (lastMsg.role === 'agent') {
+                lastMsg.link = link
+              }
+              return newMessages
+            })
+          } else if (line.startsWith('SUGGESTION: ')) {
+            const suggestion = line.substring(12)
+            setMessages(prev => {
+              const newMessages = [...prev]
+              const lastMsg = newMessages[newMessages.length - 1]
+              if (lastMsg.role === 'agent') {
+                const currentSuggestions = lastMsg.suggestions || []
+                if (!currentSuggestions.includes(suggestion)) {
+                  lastMsg.suggestions = [...currentSuggestions, suggestion]
+                }
               }
               return newMessages
             })
@@ -269,7 +354,7 @@ function App() {
 
   const handleReauth = async () => {
     try {
-      const response = await fetch('http://127.0.0.1:5000/reauth', { method: 'POST' })
+      const response = await fetch('http://127.0.0.1:5001/reauth', { method: 'POST' })
       const data = await response.json()
       alert(data.status || data.error)
     } catch (error) {
@@ -281,21 +366,31 @@ function App() {
   const markdownComponents = useRef({
     code({ node, inline, className, children, ...props }) {
       const match = /language-(\w+)/.exec(className || '')
-      // Check for 'json-chart' specifically, or if the language is 'json' and it looks like a chart config
-      const isChart = !inline && match && (match[1] === 'json-chart' || (match[1] === 'json' && String(children).includes('"type":')));
 
+      // Handle Chart
+      const isChart = !inline && match && (match[1] === 'json-chart' || (match[1] === 'json' && String(children).includes('"type":')));
       if (isChart) {
         try {
           const config = JSON.parse(String(children).replace(/\n$/, ''))
-          // Only render if it has the expected chart structure
           if (config.type && config.data && config.series) {
             return <ChartRenderer config={config} />
           }
         } catch (e) {
-          // If parsing fails, fall back to code block
           return <code className={className} {...props}>{children}</code>
         }
       }
+
+      // Handle Metadata
+      const isMetadata = !inline && match && (match[1] === 'json-metadata' || (match[1] === 'json' && String(children).includes('"fields":')));
+      if (isMetadata) {
+        try {
+          const metadata = JSON.parse(String(children).replace(/\n$/, ''))
+          return <MetadataAccordion metadata={metadata} />
+        } catch (e) {
+          return <code className={className} {...props}>{children}</code>
+        }
+      }
+
       return <code className={className} {...props}>{children}</code>
     }
   }).current
@@ -364,6 +459,39 @@ function App() {
                       {msg.content}
                     </ReactMarkdown>
                   </div>
+
+                  {/* Render Explore Link */}
+                  {msg.link && (
+                    <div className="message-actions">
+                      <a
+                        href={msg.link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="action-link"
+                      >
+                        <ExternalLink size={14} />
+                        Open in Looker
+                      </a>
+                    </div>
+                  )}
+
+                  {/* Render Suggestions */}
+                  {msg.suggestions && msg.suggestions.length > 0 && (
+                    <div className="suggestions-container">
+                      <div className="suggestions-label">Related Questions:</div>
+                      <div className="suggestions-list">
+                        {msg.suggestions.map((suggestion, i) => (
+                          <button
+                            key={i}
+                            className="suggestion-chip"
+                            onClick={() => handleSubmit(null, suggestion)}
+                          >
+                            {suggestion}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

@@ -124,12 +124,37 @@ def get_insights(question: str):
                 # Check for Explore URL
                 if 'explore_url' in result_data:
                     url = result_data['explore_url']
-                    log_thought(f"Explore URL found: {url}")
-                    # We won't append to text_insights here to avoid messing up the data flow for now.
-                    # The agent might be getting confused if text_insights has mixed content.
                 else:
-                     # Fallback if SQL isn't directly exposed, or just log fields
-                     pass
+                    try:
+                        # Fallback: Generate URL from schema fields
+                        fields = [f['name'] for f in result_data.get('schema', {}).get('fields', []) if 'name' in f]
+                        
+                        if fields:
+                            fields_str = ",".join(fields)
+                            base_uri = LOOKER_INSTANCE_URI.rstrip('/')
+                            fallback_url = f"{base_uri}/explore/{LOOKML_MODEL}/{EXPLORE}?fields={fields_str}&toggle=dat,pik,vis"
+                            
+                            # Inject into result_data
+                            result_data['explore_url'] = fallback_url
+                    except Exception as e:
+                        pass
+
+    # Post-process data_insights to merge chunks
+    merged_data = {}
+    for d in data_insights:
+        # Deep merge might be needed if keys overlap, but for now assume disjoint or override is fine
+        # except for 'result' which might need special handling if split across chunks (unlikely for this API)
+        for k, v in d.items():
+            if k == 'result' and 'result' in merged_data:
+                # If result is already there, we might want to merge data lists, but let's assume one result for now
+                pass 
+            merged_data[k] = v
+
+    if merged_data:
+        # Check for query object in merged data
+        if 'query' in merged_data:
+            # Extract filters and sorts from query object if present
+            pass
 
     # Build a descriptive response dictionary that is easier for the LLM to parse
     response = {"status": "success"}
@@ -137,8 +162,8 @@ def get_insights(question: str):
         response["text_insights"] = text_insights
     if schema_insights:
         response["schema_insights"] = schema_insights
-    if data_insights:
-        response["data_insights"] = data_insights
+    if merged_data:
+        response["data_insights"] = [merged_data]
 
     return response
 
@@ -149,15 +174,34 @@ data_agent = Agent(
     description="Retrieves raw data from Looker based on user questions.",
     instruction="""You are an agent that retrieves raw data. The tool 'get_insights' queries a governed semantic layer.
     Your task is to call the 'get_insights' tool with the user's question.
-    From the tool's dictionary output, find the 'data_insights' list. Within that list, find the dictionary that contains a 'result' key.
-    Extract the list of records from the 'data' key which is inside 'result'.
     
-    CRITICAL: You MUST return this list of records as a JSON string. 
+    The tool returns a dictionary. You need to extract three things:
+    1. The data records.
+    2. The 'explore_url'.
+    3. The 'metadata' (fields, filters, sorts) from the 'result' dictionary.
+    
+    Follow these steps precisely:
+    1. Access `data_insights` list from the tool output.
+    2. Access the first item in that list.
+    3. Access the `result` dictionary.
+    4. Extract `data` (list of records) from `result`.
+    5. Extract `explore_url` (string) from `result`.
+    6. Extract `schema` (fields), `filters`, and `sorts` from `result` if they exist.
+    
+    CRITICAL: You MUST return a JSON object containing all of these.
     
     Example output format:
-    [{"date": "2023-01-01", "revenue": 100}, {"date": "2023-01-02", "revenue": 150}]
+    {
+        "data": [{"date": "2023-01-01", "revenue": 100}, ...],
+        "explore_url": "https://looker.example.com/explore/...",
+        "metadata": {
+            "fields": [{"name": "view.field", "type": "sum"}],
+            "filters": {"view.date": "last 30 days"},
+            "sorts": ["view.date desc"]
+        }
+    }
     
-    Do not add any other text, markdown formatting, or summarization. Just the raw JSON string.
+    Do not add any other text. Just the raw JSON string.
     """,
     tools=[get_insights],
 )
@@ -207,23 +251,44 @@ root_agent = Agent(
         -   Look for `data_insights` which contains the actual query results.
         -   Look for `text_insights` for any additional context or SQL queries.
     3.  **Answer the question**:
-        -   The `get_insights` tool will return a JSON string of data.
-        -   **Step 1**: Parse this JSON string to ensure it is valid data.
-        -   **Step 2**: **ALWAYS** output the data as a Markdown table.
+        -   The `get_insights` tool will return a JSON object containing `data_insights` (a list).
+        -   **Step 1**: Access the first item in `data_insights`. Let's call this `insight`.
+        -   **Step 2**: **ALWAYS** output the `insight['result']['data']` list as a Markdown table.
             -   If it's a single value, make a one-row table.
             -   If it's multiple rows, make a full table.
-        -   **Step 3**: If the data has multiple rows (e.g. time series, categories), **YOU MUST CALL** the `VisualizationAgent` tool.
-            -   Pass the data JSON to `VisualizationAgent` and wait for its response.
+        -   **Step 3**: If the `data` list has multiple rows (e.g. time series, categories), **YOU MUST CALL** the `VisualizationAgent` tool.
+            -   Pass ONLY the `data` list (not the full object) to `VisualizationAgent` and wait for its response.
         -   **Step 4**: Output the JSON returned by `VisualizationAgent` in a code block with the language `json-chart`.
-        -   **Step 5**: Add a brief summary.
+        -   **Step 5**: **CRITICAL**: Check for the `explore_url` in `insight['result']`. 
+            -   If found, output it on a new line prefixed with `LINK: `.
+            -   Example: `LINK: https://looker.example.com/...`
+        -   **Step 6**: Check for `metadata` (fields, filters, sorts).
+            -   **CRITICAL**: Look for metadata in `insight['query']['looker']`.
+            -   It should contain `fields`, `filters`, and `sorts`.
+            -   If found, output it in a code block with the language `json-metadata`.
+            -   **CRITICAL**: Ensure there is a blank line before and after the code block.
+            -   Example:
+                
+                ```json-metadata
+                { "fields": [...], "filters": [...], "sorts": [...] }
+                ```
+                
+        -   **Step 7**: Add a brief summary.
+        -   **Step 8**: Generate 2-3 relevant follow-up questions based on the data and user's intent. Output each on a new line prefixed with `SUGGESTION: `.
         
     4.  **Formatting**:
         -   **CRITICAL**: You MUST output the data table.
         -   **CRITICAL**: For charts, use the `json-chart` language tag.
+        -   **CRITICAL**: For metadata, use the `json-metadata` language tag.
+        -   **CRITICAL**: You MUST output the `LINK:` line if an explore_url exists.
+        -   **CRITICAL**: For suggestions, use the format: `SUGGESTION: What is...`
           Example:
           ```json-chart
           { ... json from VisualizationAgent ... }
           ```
+          LINK: https://looker.example.com/explore/...
+          SUGGESTION: Break this down by country?
+          SUGGESTION: Show me the top 5 games?
     
     5.  **Important**:
         -   Do NOT hallucinate data. Use ONLY what is returned by the tools.
