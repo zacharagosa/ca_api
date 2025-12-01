@@ -168,6 +168,9 @@ function App() {
     scrollToBottom()
   }, [messages])
 
+  // Determine API base URL: localhost for dev, relative path for production
+  const API_BASE_URL = import.meta.env.DEV ? 'http://127.0.0.1:5001' : '';
+
   // Refactored handleSubmit to accept an optional message argument and return a promise
   const handleSubmit = async (e, manualMessage = null) => {
     if (e) e.preventDefault()
@@ -187,8 +190,8 @@ function App() {
     setLastResponse(null)
 
     try {
-      console.log('Fetching from http://127.0.0.1:5001/chat...')
-      const response = await fetch('http://127.0.0.1:5001/chat', {
+      console.log(`Fetching from ${API_BASE_URL}/chat...`)
+      const response = await fetch(`${API_BASE_URL}/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -354,7 +357,7 @@ function App() {
 
   const handleReauth = async () => {
     try {
-      const response = await fetch('http://127.0.0.1:5001/reauth', { method: 'POST' })
+      const response = await fetch(`${API_BASE_URL}/reauth`, { method: 'POST' })
       const data = await response.json()
       alert(data.status || data.error)
     } catch (error) {

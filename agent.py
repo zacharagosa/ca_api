@@ -17,12 +17,13 @@ PROJECT_ID = "aragosalooker"
 LOCATION = "us-central1"
 
 import queue
-thought_queue = queue.Queue()
+thought_queue = None
 
 def log_thought(message):
     """Logs a thought to the queue for the frontend to consume."""
     print(f"Logging thought: {message}")
-    thought_queue.put(message)
+    if thought_queue:
+        thought_queue.put(message)
 
 def get_insights(question: str):
     """Queries the Conversational Analytics API using a question as input.
@@ -100,8 +101,11 @@ def get_insights(question: str):
     data_insights = []
 
     log_thought("Processing results...")
+    
+    # Iterate through the stream
     for item in stream:
-        if item._pb.WhichOneof("kind") == "system_message":
+        kind = item._pb.WhichOneof("kind")
+        if kind == "system_message":
             message_dict = geminidataanalytics.SystemMessage.to_dict(
                 item.system_message
             )
@@ -110,10 +114,6 @@ def get_insights(question: str):
             elif "schema" in message_dict:
                 schema_insights.append(message_dict["schema"])
             elif "data" in message_dict:
-                # IMPORTANT: The agent needs the 'data' list inside the result
-                # message_dict['data'] is the wrapper. 
-                # message_dict['data']['result']['data'] is the actual list of rows.
-                # We should pass the whole wrapper so the agent can see metadata, but verify it's correct.
                 data_insights.append(message_dict["data"])
                 
                 # Extract and log the SQL query if available
@@ -138,6 +138,14 @@ def get_insights(question: str):
                             result_data['explore_url'] = fallback_url
                     except Exception as e:
                         pass
+        elif kind == "tool_use":
+             # Handle tool use if necessary, or just log
+             pass
+        elif kind == "tool_output":
+             pass
+    
+    # Wait for stream to complete
+    log_thought("Stream processing complete.")
 
     # Post-process data_insights to merge chunks
     merged_data = {}
@@ -241,7 +249,7 @@ visualization_agent = Agent(
 
 root_agent = Agent(
     model="gemini-2.5-pro",
-    name="RootAgent",
+    name="CA_API",
     instruction="""You are a helpful mobile gaming data analyst.
     
     Your goal is to answer user questions about their game data.
