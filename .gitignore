@@ -1,0 +1,8 @@
+venv/
+.env
+frontend/.env
+*.pyc
+__pycache__/
+downloaded-logs-*.json
+inspect_lib.py
+inspect_lib_2.py

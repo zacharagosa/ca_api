@@ -1,5 +1,6 @@
 import os
 import json
+import threading
 from google.cloud import geminidataanalytics
 from google.adk.agents import Agent
 from google.adk.tools import agent_tool
@@ -30,6 +31,17 @@ def log_thought(message):
     if thought_queue:
         thought_queue.put(message)
 
+# Thread-local storage for request-scoped data (like user tokens)
+_thread_local = threading.local()
+
+def set_access_token(token):
+    """Sets the Looker access token for the current thread."""
+    _thread_local.access_token = token
+
+def get_access_token():
+    """Gets the Looker access token for the current thread."""
+    return getattr(_thread_local, 'access_token', None)
+
 def get_insights(question: str):
     """Queries the Conversational Analytics API using a question as input.
 
@@ -46,13 +58,27 @@ def get_insights(question: str):
 
     data_chat_client = geminidataanalytics.DataChatServiceClient()
 
-    credentials = geminidataanalytics.Credentials(
-        oauth=geminidataanalytics.OAuthCredentials(
-            secret=geminidataanalytics.OAuthCredentials.SecretBased(
-                client_id=LOOKER_CLIENT_ID, client_secret=LOOKER_CLIENT_SECRET
-            ),
+    # Check for user-specific access token
+    user_token = get_access_token()
+    
+    if user_token:
+        log_debug("Using user-specific Looker access token.")
+        credentials = geminidataanalytics.Credentials(
+            oauth=geminidataanalytics.OAuthCredentials(
+                token=geminidataanalytics.OAuthCredentials.TokenBased(
+                    access_token=user_token
+                )
+            )
         )
-    )
+    else:
+        log_debug("Using service account Looker credentials.")
+        credentials = geminidataanalytics.Credentials(
+            oauth=geminidataanalytics.OAuthCredentials(
+                secret=geminidataanalytics.OAuthCredentials.SecretBased(
+                    client_id=LOOKER_CLIENT_ID, client_secret=LOOKER_CLIENT_SECRET
+                ),
+            )
+        )
 
     looker_explore_reference = geminidataanalytics.LookerExploreReference(
         looker_instance_uri=LOOKER_INSTANCE_URI, lookml_model=LOOKML_MODEL, explore=EXPLORE
@@ -66,7 +92,10 @@ def get_insights(question: str):
         ),
     )
 
-    system_instruction = "You are a specialized AI data analyst for a mobile gaming company. Your primary function is to answer natural language questions from a user by constructing and executing precise queries against a Looker instance."
+    system_instruction = """You are a specialized AI data analyst for a mobile gaming company. Your primary function is to answer natural language questions from a user by constructing and executing precise queries against a Looker instance.
+    
+    When you generate a response with data, you MUST include a JSON block with type `json-metadata` containing the query details (filters, sorts, fields) AND the generated SQL query in a field named `sql`.
+    """
 
     # Context set-up for 'Chat using Inline Context'
     inline_context = geminidataanalytics.Context(
@@ -177,6 +206,30 @@ def get_insights(question: str):
             
         merged_data = json.loads(json.dumps(merged_data, default=json_default))
         log_debug("Merged data serialization successful.")
+        
+        # Rename keys in rows using field labels for better formatting
+        if 'result' in merged_data and 'schema' in merged_data['result'] and 'rows' in merged_data['result']:
+            try:
+                fields = merged_data['result']['schema'].get('fields', [])
+                field_map = {}
+                for f in fields:
+                    # Prefer label, then title, then name
+                    # Looker API usually provides 'title' or 'label_short' or 'label'
+                    label = f.get('label_short') or f.get('label') or f.get('title') or f.get('name')
+                    if 'name' in f:
+                        field_map[f['name']] = label
+                
+                if field_map:
+                    new_rows = []
+                    for row in merged_data['result']['rows']:
+                        new_row = {}
+                        for k, v in row.items():
+                            new_row[field_map.get(k, k)] = v
+                        new_rows.append(new_row)
+                    merged_data['result']['rows'] = new_rows
+                    log_debug("Renamed row keys using field labels.")
+            except Exception as e:
+                log_debug(f"Error renaming keys: {e}")
         
     except Exception as e:
         log_thought(f"Error merging/serializing data: {e}")
