@@ -1,5 +1,8 @@
 import os
 import json
+from dotenv import load_dotenv
+
+load_dotenv()
 import threading
 from google.cloud import geminidataanalytics
 from google.adk.agents import Agent
@@ -10,13 +13,13 @@ import vertexai
 from vertexai.preview import reasoning_engines
 
 # Configuration - In a real app, use environment variables
-LOOKER_CLIENT_ID = os.getenv("LOOKER_CLIENT_ID", "9cR2K4JdGYjZCBCm6HGs")
-LOOKER_CLIENT_SECRET = os.getenv("LOOKER_CLIENT_SECRET", "8YP9CWFVhdzxF2dvPsyJhQdR")
-LOOKER_INSTANCE_URI = os.getenv("LOOKER_INSTANCE_URI", "https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app")
-LOOKML_MODEL = "gaming"
-EXPLORE = "events"
-PROJECT_ID = "aragosalooker"
-LOCATION = "us-central1"
+LOOKER_CLIENT_ID = os.getenv("LOOKER_CLIENT_ID")
+LOOKER_CLIENT_SECRET = os.getenv("LOOKER_CLIENT_SECRET")
+LOOKER_INSTANCE_URI = os.getenv("LOOKER_INSTANCE_URI")
+LOOKML_MODEL = os.getenv("LOOKML_MODEL", "gaming")
+EXPLORE = os.getenv("EXPLORE", "events")
+PROJECT_ID = os.getenv("PROJECT_ID", "aragosalooker")
+LOCATION = os.getenv("LOCATION", "us-central1")
 
 import queue
 thought_queue = None
