@@ -4,3 +4,4 @@ google-auth
 google-adk
 flask
 flask-cors
+requests

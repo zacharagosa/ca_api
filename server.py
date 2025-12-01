@@ -5,6 +5,8 @@ import vertexai
 import threading
 import queue
 import agent
+import requests
+import urllib.parse
 agent.thought_queue = queue.Queue()
 
 # Initialize Vertex AI for local execution
@@ -67,7 +69,17 @@ def chat():
         # Queue for agent response chunks
         response_queue = queue.Queue()
         
+        # Extract token
+        auth_header = request.headers.get('Authorization')
+        access_token = None
+        if auth_header and auth_header.startswith('Bearer '):
+            access_token = auth_header.split(' ')[1]
+
         def run_agent():
+            # Set token for this thread
+            if access_token:
+                agent.set_access_token(access_token)
+
             try:
                 stream = agent_app.stream_query(message=user_input, user_id=user_id, session_id=session_id)
                 for chunk in stream:
@@ -134,11 +146,62 @@ def insights():
         return jsonify({'error': 'No question provided'}), 400
     
     try:
+        # Extract token
+        auth_header = request.headers.get('Authorization')
+        if auth_header and auth_header.startswith('Bearer '):
+            agent.set_access_token(auth_header.split(' ')[1])
+
         # Call the tool directly
         result = agent.get_insights(question)
         return jsonify(result)
     except Exception as e:
         print(f"Insights Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/auth/login_url', methods=['GET'])
+def login_url():
+    """Returns the Looker OAuth authorization URL."""
+    base_uri = agent.LOOKER_INSTANCE_URI.rstrip('/')
+    client_id = agent.LOOKER_CLIENT_ID
+    redirect_uri = request.args.get('redirect_uri', 'http://localhost:5173/auth/callback')
+    
+    params = {
+        'client_id': client_id,
+        'redirect_uri': redirect_uri,
+        'response_type': 'code',
+        'scope': 'api'
+    }
+    url = f"{base_uri}/auth/authorize?{urllib.parse.urlencode(params)}"
+    return jsonify({'url': url})
+
+@app.route('/auth/exchange', methods=['POST'])
+def exchange_token():
+    """Exchanges authorization code for access token."""
+    code = request.json.get('code')
+    redirect_uri = request.json.get('redirect_uri', 'http://localhost:5173/auth/callback')
+    
+    if not code:
+        return jsonify({'error': 'No code provided'}), 400
+        
+    base_uri = agent.LOOKER_INSTANCE_URI.rstrip('/')
+    token_url = f"{base_uri}/api/token"
+    
+    data = {
+        'client_id': agent.LOOKER_CLIENT_ID,
+        'client_secret': agent.LOOKER_CLIENT_SECRET,
+        'code': code,
+        'grant_type': 'authorization_code',
+        'redirect_uri': redirect_uri
+    }
+    
+    try:
+        response = requests.post(token_url, data=data)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except Exception as e:
+        print(f"Token Exchange Error: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+             print(f"Response: {e.response.text}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/reauth', methods=['POST'])

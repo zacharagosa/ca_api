@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { useGoogleLogin } from '@react-oauth/google'
 import { Send, Bot, User, Loader2, Code, X, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -74,6 +75,24 @@ const ChartRenderer = ({ config }) => {
   );
 };
 
+const ContentAccordion = ({ children, title }) => {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <div className="chart-accordion">
+      <button
+        className="chart-header"
+        onClick={() => setIsOpen(!isOpen)}
+        type="button"
+      >
+        <span>{title || "Data Table"}</span>
+        {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+      </button>
+      {isOpen && <div className="chart-content">{children}</div>}
+    </div>
+  )
+}
+
 const MetadataAccordion = ({ metadata }) => {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -95,6 +114,13 @@ const MetadataAccordion = ({ metadata }) => {
 
       {isOpen && (
         <div className="metadata-content">
+          {metadata.sql && (
+            <div className="metadata-section">
+              <h4>Generated SQL</h4>
+              <pre className="sql-code">{metadata.sql}</pre>
+            </div>
+          )}
+
           {metadata.filters && Object.keys(metadata.filters).length > 0 && (
             <div className="metadata-section">
               <h4>Filters</h4>
@@ -179,6 +205,7 @@ function App() {
   const [messages, setMessages] = useState([
     { role: 'agent', content: 'Hello! I am your mobile gaming data analyst. How can I help you today?' }
   ])
+  const [accessToken, setAccessToken] = useState(localStorage.getItem('looker_access_token'))
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [showPayload, setShowPayload] = useState(false)
@@ -190,14 +217,14 @@ function App() {
   const [isAutoTesting, setIsAutoTesting] = useState(false)
   const autoTestIntervalRef = useRef(null)
 
-  const TEST_QUESTIONS = [
+  const STARTER_QUESTIONS = [
     "What is the total revenue for the last 30 days?",
     "Show me a trend of daily active users for the last week.",
     "What are the top 3 games by revenue?",
-    "Break down the number of sessions by device platform.",
-    "How many new users did we acquire yesterday?",
-    "Show me the revenue by country as a pie chart."
+    "Break down the number of sessions by device platform."
   ];
+
+  const TEST_QUESTIONS = STARTER_QUESTIONS;
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -209,6 +236,16 @@ function App() {
 
   // Determine API base URL: localhost for dev, relative path for production
   const API_BASE_URL = import.meta.env.DEV ? 'http://127.0.0.1:5001' : '';
+
+  const login = useGoogleLogin({
+    onSuccess: tokenResponse => {
+      console.log(tokenResponse);
+      setAccessToken(tokenResponse.access_token);
+      localStorage.setItem('looker_access_token', tokenResponse.access_token);
+    },
+    onError: error => console.log('Login Failed:', error),
+    scope: 'https://www.googleapis.com/auth/cloud-platform'
+  });
 
   // Refactored handleSubmit to accept an optional message argument and return a promise
   const handleSubmit = async (e, manualMessage = null) => {
@@ -234,6 +271,7 @@ function App() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(accessToken ? { 'Authorization': `Bearer ${accessToken}` } : {})
         },
         body: JSON.stringify(requestPayload),
       })
@@ -436,8 +474,31 @@ function App() {
       }
 
       return <code className={className} {...props}>{children}</code>
+    },
+    table({ children, ...props }) {
+      return (
+        <ContentAccordion title="Data Table">
+          <table {...props}>{children}</table>
+        </ContentAccordion>
+      )
     }
   }).current
+
+  const logout = () => {
+    setAccessToken(null);
+    localStorage.removeItem('looker_access_token');
+  };
+
+  if (!accessToken) {
+    return (
+      <div className="login-container">
+        <h1>Gaming Analytics Agent</h1>
+        <button onClick={() => login()} className="login-btn">
+          Log-in to Looker
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div className="app-container">
@@ -455,13 +516,13 @@ function App() {
             </button>
             <button
               className="reauth-btn"
-              onClick={handleReauth}
-              title="Re-authenticate with Google Cloud"
+              onClick={logout}
+              title="Logout"
             >
-              Re-auth
+              Logout
             </button>
             <button
-              className={`payload-toggle ${showPayload ? 'active' : ''}`}
+              className={`payload - toggle ${showPayload ? 'active' : ''} `}
               onClick={() => setShowPayload(!showPayload)}
               title="Toggle Payload View"
             >
@@ -475,7 +536,7 @@ function App() {
         <main className="chat-container">
           <div className="messages-list">
             {messages.map((msg, index) => (
-              <div key={index} className={`message ${msg.role}`}>
+              <div key={index} className={`message ${msg.role} `}>
                 <div className="message-content">
                   <div className="message-header">
                     {msg.role === 'agent' ? <Bot size={16} /> : <User size={16} />}
@@ -534,6 +595,25 @@ function App() {
                 </div>
               </div>
             ))}
+
+            {messages.length === 1 && !isLoading && (
+              <div className="starter-questions-container">
+                <div className="starter-header">
+                  <h3>Try asking...</h3>
+                </div>
+                <div className="starter-grid">
+                  {STARTER_QUESTIONS.map((q, i) => (
+                    <button
+                      key={i}
+                      onClick={() => handleSubmit(null, q)}
+                      className="starter-card"
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {isLoading && (
               <div className="message agent">
                 <div className="message-content">
