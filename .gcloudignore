@@ -1,0 +1,11 @@
+.git
+.gitignore
+venv/
+frontend/node_modules/
+frontend/.env
+__pycache__/
+*.pyc
+.DS_Store
+inspect_lib.py
+inspect_lib_2.py
+downloaded-logs-*.json

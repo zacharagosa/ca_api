@@ -1,4 +1,9 @@
 import os
+import json
+from dotenv import load_dotenv
+
+load_dotenv()
+import threading
 from google.cloud import geminidataanalytics
 from google.adk.agents import Agent
 from google.adk.tools import agent_tool
@@ -8,21 +13,37 @@ import vertexai
 from vertexai.preview import reasoning_engines
 
 # Configuration - In a real app, use environment variables
-LOOKER_CLIENT_ID = os.getenv("LOOKER_CLIENT_ID", "REDACTED_CLIENT_ID")
-LOOKER_CLIENT_SECRET = os.getenv("LOOKER_CLIENT_SECRET", "REDACTED_CLIENT_SECRET")
-LOOKER_INSTANCE_URI = os.getenv("LOOKER_INSTANCE_URI", "https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app")
-LOOKML_MODEL = "gaming"
-EXPLORE = "events"
-PROJECT_ID = "aragosalooker"
-LOCATION = "us-central1"
+LOOKER_CLIENT_ID = os.getenv("LOOKER_CLIENT_ID")
+LOOKER_CLIENT_SECRET = os.getenv("LOOKER_CLIENT_SECRET")
+LOOKER_INSTANCE_URI = os.getenv("LOOKER_INSTANCE_URI")
+LOOKML_MODEL = os.getenv("LOOKML_MODEL", "gaming")
+EXPLORE = os.getenv("EXPLORE", "events")
+PROJECT_ID = os.getenv("PROJECT_ID", "aragosalooker")
+LOCATION = os.getenv("LOCATION", "us-central1")
 
 import queue
-thought_queue = queue.Queue()
+thought_queue = None
+
+def log_debug(message):
+    """Logs a debug message to Cloud Logging only."""
+    print(f"DEBUG: {message}")
 
 def log_thought(message):
     """Logs a thought to the queue for the frontend to consume."""
     print(f"Logging thought: {message}")
-    thought_queue.put(message)
+    if thought_queue:
+        thought_queue.put(message)
+
+# Thread-local storage for request-scoped data (like user tokens)
+_thread_local = threading.local()
+
+def set_access_token(token):
+    """Sets the Looker access token for the current thread."""
+    _thread_local.access_token = token
+
+def get_access_token():
+    """Gets the Looker access token for the current thread."""
+    return getattr(_thread_local, 'access_token', None)
 
 def get_insights(question: str):
     """Queries the Conversational Analytics API using a question as input.
@@ -40,13 +61,27 @@ def get_insights(question: str):
 
     data_chat_client = geminidataanalytics.DataChatServiceClient()
 
-    credentials = geminidataanalytics.Credentials(
-        oauth=geminidataanalytics.OAuthCredentials(
-            secret=geminidataanalytics.OAuthCredentials.SecretBased(
-                client_id=LOOKER_CLIENT_ID, client_secret=LOOKER_CLIENT_SECRET
-            ),
+    # Check for user-specific access token
+    user_token = get_access_token()
+    
+    if user_token:
+        log_debug("Using user-specific Looker access token.")
+        credentials = geminidataanalytics.Credentials(
+            oauth=geminidataanalytics.OAuthCredentials(
+                token=geminidataanalytics.OAuthCredentials.TokenBased(
+                    access_token=user_token
+                )
+            )
         )
-    )
+    else:
+        log_debug("Using service account Looker credentials.")
+        credentials = geminidataanalytics.Credentials(
+            oauth=geminidataanalytics.OAuthCredentials(
+                secret=geminidataanalytics.OAuthCredentials.SecretBased(
+                    client_id=LOOKER_CLIENT_ID, client_secret=LOOKER_CLIENT_SECRET
+                ),
+            )
+        )
 
     looker_explore_reference = geminidataanalytics.LookerExploreReference(
         looker_instance_uri=LOOKER_INSTANCE_URI, lookml_model=LOOKML_MODEL, explore=EXPLORE
@@ -60,7 +95,10 @@ def get_insights(question: str):
         ),
     )
 
-    system_instruction = "You are a specialized AI data analyst for a mobile gaming company. Your primary function is to answer natural language questions from a user by constructing and executing precise queries against a Looker instance."
+    system_instruction = """You are a specialized AI data analyst for a mobile gaming company. Your primary function is to answer natural language questions from a user by constructing and executing precise queries against a Looker instance.
+    
+    When you generate a response with data, you MUST include a JSON block with type `json-metadata` containing the query details (filters, sorts, fields) AND the generated SQL query in a field named `sql`.
+    """
 
     # Context set-up for 'Chat using Inline Context'
     inline_context = geminidataanalytics.Context(
@@ -100,26 +138,32 @@ def get_insights(question: str):
     data_insights = []
 
     log_thought("Processing results...")
-    for item in stream:
-        if item._pb.WhichOneof("kind") == "system_message":
+    
+    # Iterate through the stream
+    for i, item in enumerate(stream):
+        kind = item._pb.WhichOneof("kind")
+        log_debug(f"Stream Chunk {i} Kind: {kind}")
+        
+        if kind == "system_message":
             message_dict = geminidataanalytics.SystemMessage.to_dict(
                 item.system_message
             )
+            log_debug(f"Chunk {i} Content Keys: {list(message_dict.keys())}")
+            
             if "text" in message_dict:
+                log_debug(f"Chunk {i} Text: {message_dict['text']}")
                 text_insights.append(message_dict["text"])
             elif "schema" in message_dict:
+                log_debug(f"Chunk {i} Schema: {message_dict['schema']}")
                 schema_insights.append(message_dict["schema"])
             elif "data" in message_dict:
-                # IMPORTANT: The agent needs the 'data' list inside the result
-                # message_dict['data'] is the wrapper. 
-                # message_dict['data']['result']['data'] is the actual list of rows.
-                # We should pass the whole wrapper so the agent can see metadata, but verify it's correct.
+                log_debug(f"Chunk {i} Data: {message_dict['data']}")
                 data_insights.append(message_dict["data"])
                 
                 # Extract and log the SQL query if available
                 result_data = message_dict['data'].get('result', {})
                 if 'sql' in result_data:
-                     log_thought(f"Generated SQL: {result_data['sql']}")
+                     log_debug(f"Generated SQL: {result_data['sql']}")
                 
                 # Check for Explore URL
                 if 'explore_url' in result_data:
@@ -137,33 +181,100 @@ def get_insights(question: str):
                             # Inject into result_data
                             result_data['explore_url'] = fallback_url
                     except Exception as e:
+                        log_debug(f"Error generating fallback URL: {e}")
                         pass
+        elif kind == "tool_use":
+             log_debug(f"Chunk {i} Tool Use: {item.tool_use}")
+             pass
+        elif kind == "tool_output":
+             log_debug(f"Chunk {i} Tool Output: {item.tool_output}")
+             pass
+    
+    # Wait for stream to complete
+    log_thought("Stream processing complete.")
+    log_debug(f"Data Insights Chunks: {len(data_insights)}")
 
     # Post-process data_insights to merge chunks
     merged_data = {}
-    for d in data_insights:
-        # Deep merge might be needed if keys overlap, but for now assume disjoint or override is fine
-        # except for 'result' which might need special handling if split across chunks (unlikely for this API)
-        for k, v in d.items():
-            if k == 'result' and 'result' in merged_data:
-                # If result is already there, we might want to merge data lists, but let's assume one result for now
-                pass 
-            merged_data[k] = v
+    try:
+        for d in data_insights:
+            for k, v in d.items():
+                merged_data[k] = v
+        
+        # Robust serialization
+        def json_default(obj):
+            if hasattr(obj, 'to_dict'):
+                return obj.to_dict()
+            return str(obj)
+            
+        merged_data = json.loads(json.dumps(merged_data, default=json_default))
+        log_debug("Merged data serialization successful.")
+        
+        # Rename keys in rows using field labels for better formatting
+        if 'result' in merged_data and 'schema' in merged_data['result'] and 'rows' in merged_data['result']:
+            try:
+                fields = merged_data['result']['schema'].get('fields', [])
+                field_map = {}
+                for f in fields:
+                    # Prefer label, then title, then name
+                    # Looker API usually provides 'title' or 'label_short' or 'label'
+                    label = f.get('label_short') or f.get('label') or f.get('title') or f.get('name')
+                    if 'name' in f:
+                        field_map[f['name']] = label
+                
+                if field_map:
+                    new_rows = []
+                    for row in merged_data['result']['rows']:
+                        new_row = {}
+                        for k, v in row.items():
+                            new_row[field_map.get(k, k)] = v
+                        new_rows.append(new_row)
+                    merged_data['result']['rows'] = new_rows
+                    log_debug("Renamed row keys using field labels.")
+            except Exception as e:
+                log_debug(f"Error renaming keys: {e}")
+        
+    except Exception as e:
+        log_thought(f"Error merging/serializing data: {e}")
+        merged_data = {} 
 
-    if merged_data:
-        # Check for query object in merged data
-        if 'query' in merged_data:
-            # Extract filters and sorts from query object if present
-            pass
-
-    # Build a descriptive response dictionary that is easier for the LLM to parse
+    # Build a descriptive response dictionary
     response = {"status": "success"}
+    
+    # Helper for other insights
+    def make_serializable(obj):
+        if isinstance(obj, dict):
+            return {k: make_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [make_serializable(v) for v in obj]
+        elif hasattr(obj, 'to_dict'):
+            return make_serializable(obj.to_dict())
+        elif hasattr(obj, '__dict__'):
+            return make_serializable(obj.__dict__)
+        else:
+            return obj
+
     if text_insights:
-        response["text_insights"] = text_insights
+        response["text_insights"] = make_serializable(text_insights)
     if schema_insights:
-        response["schema_insights"] = schema_insights
+        response["schema_insights"] = make_serializable(schema_insights)
     if merged_data:
         response["data_insights"] = [merged_data]
+        
+        # Log summary of the data
+        try:
+            data_keys = list(merged_data.keys())
+            log_debug(f"Final Merged Data Keys: {data_keys}")
+            if 'result' in merged_data:
+                result_keys = list(merged_data['result'].keys())
+                log_debug(f"Result Keys: {result_keys}")
+                if 'data' in merged_data['result']:
+                    data_len = len(merged_data['result']['data'])
+                    log_thought(f"Data Rows Count: {data_len}")
+                    if data_len > 0:
+                        log_debug(f"First Row Sample: {merged_data['result']['data'][0]}")
+        except Exception as e:
+            log_debug(f"Error logging summary: {e}")
 
     return response
 
@@ -241,7 +352,7 @@ visualization_agent = Agent(
 
 root_agent = Agent(
     model="gemini-2.5-pro",
-    name="RootAgent",
+    name="CA_API",
     instruction="""You are a helpful mobile gaming data analyst.
     
     Your goal is to answer user questions about their game data.
