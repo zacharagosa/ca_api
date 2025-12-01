@@ -1,4 +1,5 @@
 import os
+import json
 from google.cloud import geminidataanalytics
 from google.adk.agents import Agent
 from google.adk.tools import agent_tool
@@ -18,6 +19,10 @@ LOCATION = "us-central1"
 
 import queue
 thought_queue = None
+
+def log_debug(message):
+    """Logs a debug message to Cloud Logging only."""
+    print(f"DEBUG: {message}")
 
 def log_thought(message):
     """Logs a thought to the queue for the frontend to consume."""
@@ -103,23 +108,30 @@ def get_insights(question: str):
     log_thought("Processing results...")
     
     # Iterate through the stream
-    for item in stream:
+    for i, item in enumerate(stream):
         kind = item._pb.WhichOneof("kind")
+        log_debug(f"Stream Chunk {i} Kind: {kind}")
+        
         if kind == "system_message":
             message_dict = geminidataanalytics.SystemMessage.to_dict(
                 item.system_message
             )
+            log_debug(f"Chunk {i} Content Keys: {list(message_dict.keys())}")
+            
             if "text" in message_dict:
+                log_debug(f"Chunk {i} Text: {message_dict['text']}")
                 text_insights.append(message_dict["text"])
             elif "schema" in message_dict:
+                log_debug(f"Chunk {i} Schema: {message_dict['schema']}")
                 schema_insights.append(message_dict["schema"])
             elif "data" in message_dict:
+                log_debug(f"Chunk {i} Data: {message_dict['data']}")
                 data_insights.append(message_dict["data"])
                 
                 # Extract and log the SQL query if available
                 result_data = message_dict['data'].get('result', {})
                 if 'sql' in result_data:
-                     log_thought(f"Generated SQL: {result_data['sql']}")
+                     log_debug(f"Generated SQL: {result_data['sql']}")
                 
                 # Check for Explore URL
                 if 'explore_url' in result_data:
@@ -137,41 +149,76 @@ def get_insights(question: str):
                             # Inject into result_data
                             result_data['explore_url'] = fallback_url
                     except Exception as e:
+                        log_debug(f"Error generating fallback URL: {e}")
                         pass
         elif kind == "tool_use":
-             # Handle tool use if necessary, or just log
+             log_debug(f"Chunk {i} Tool Use: {item.tool_use}")
              pass
         elif kind == "tool_output":
+             log_debug(f"Chunk {i} Tool Output: {item.tool_output}")
              pass
     
     # Wait for stream to complete
     log_thought("Stream processing complete.")
+    log_debug(f"Data Insights Chunks: {len(data_insights)}")
 
     # Post-process data_insights to merge chunks
     merged_data = {}
-    for d in data_insights:
-        # Deep merge might be needed if keys overlap, but for now assume disjoint or override is fine
-        # except for 'result' which might need special handling if split across chunks (unlikely for this API)
-        for k, v in d.items():
-            if k == 'result' and 'result' in merged_data:
-                # If result is already there, we might want to merge data lists, but let's assume one result for now
-                pass 
-            merged_data[k] = v
+    try:
+        for d in data_insights:
+            for k, v in d.items():
+                merged_data[k] = v
+        
+        # Robust serialization
+        def json_default(obj):
+            if hasattr(obj, 'to_dict'):
+                return obj.to_dict()
+            return str(obj)
+            
+        merged_data = json.loads(json.dumps(merged_data, default=json_default))
+        log_debug("Merged data serialization successful.")
+        
+    except Exception as e:
+        log_thought(f"Error merging/serializing data: {e}")
+        merged_data = {} 
 
-    if merged_data:
-        # Check for query object in merged data
-        if 'query' in merged_data:
-            # Extract filters and sorts from query object if present
-            pass
-
-    # Build a descriptive response dictionary that is easier for the LLM to parse
+    # Build a descriptive response dictionary
     response = {"status": "success"}
+    
+    # Helper for other insights
+    def make_serializable(obj):
+        if isinstance(obj, dict):
+            return {k: make_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [make_serializable(v) for v in obj]
+        elif hasattr(obj, 'to_dict'):
+            return make_serializable(obj.to_dict())
+        elif hasattr(obj, '__dict__'):
+            return make_serializable(obj.__dict__)
+        else:
+            return obj
+
     if text_insights:
-        response["text_insights"] = text_insights
+        response["text_insights"] = make_serializable(text_insights)
     if schema_insights:
-        response["schema_insights"] = schema_insights
+        response["schema_insights"] = make_serializable(schema_insights)
     if merged_data:
         response["data_insights"] = [merged_data]
+        
+        # Log summary of the data
+        try:
+            data_keys = list(merged_data.keys())
+            log_debug(f"Final Merged Data Keys: {data_keys}")
+            if 'result' in merged_data:
+                result_keys = list(merged_data['result'].keys())
+                log_debug(f"Result Keys: {result_keys}")
+                if 'data' in merged_data['result']:
+                    data_len = len(merged_data['result']['data'])
+                    log_thought(f"Data Rows Count: {data_len}")
+                    if data_len > 0:
+                        log_debug(f"First Row Sample: {merged_data['result']['data'][0]}")
+        except Exception as e:
+            log_debug(f"Error logging summary: {e}")
 
     return response
 
