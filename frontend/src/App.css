@@ -621,3 +621,42 @@ button:disabled {
   color: white;
   /* White on blue background */
 }
+/* Thinking Process Accordion */
+.thoughts-accordion {
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  border: 1px solid #e9ecef;
+  overflow: hidden;
+}
+
+.thoughts-header-btn {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background-color: #f8f9fa;
+  border: none;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #6c757d;
+  transition: background-color 0.2s;
+}
+
+.thoughts-header-btn:hover {
+  background-color: #e9ecef;
+}
+
+.thoughts-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.thoughts-list {
+  padding: 12px;
+  border-top: 1px solid #e9ecef;
+  background-color: white;
+}

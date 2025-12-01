@@ -136,6 +136,45 @@ const MetadataAccordion = ({ metadata }) => {
   );
 };
 
+const ThinkingProcessAccordion = ({ thoughts, isComplete }) => {
+  const [isOpen, setIsOpen] = useState(!isComplete);
+
+  useEffect(() => {
+    if (isComplete) {
+      setIsOpen(false);
+    } else {
+      setIsOpen(true);
+    }
+  }, [isComplete]);
+
+  if (!thoughts || thoughts.length === 0) return null;
+
+  return (
+    <div className="thoughts-accordion">
+      <button
+        className="thoughts-header-btn"
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        <div className="thoughts-summary">
+          <span>Thinking Process ({thoughts.length} steps)</span>
+        </div>
+        {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+      </button>
+
+      {isOpen && (
+        <div className="thoughts-list">
+          {thoughts.map((thought, i) => (
+            <div key={i} className="thought-item">
+              <span className="thought-dot"></span>
+              {thought}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 function App() {
   const [messages, setMessages] = useState([
     { role: 'agent', content: 'Hello! I am your mobile gaming data analyst. How can I help you today?' }
@@ -204,8 +243,9 @@ function App() {
         throw new Error(data.error || 'Failed to fetch')
       }
       // Initialize empty agent message
+      // Initialize empty agent message
       setMessages(prev => [...prev, { role: 'agent', content: '', thoughts: [] }])
-      setIsLoading(false)
+      // setIsLoading(false) // Moved to end of stream
 
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
@@ -240,7 +280,7 @@ function App() {
               if (lastMsg.role === 'agent') {
                 const currentThoughts = lastMsg.thoughts || []
                 if (!currentThoughts.includes(thought)) {
-                  const updatedThoughts = [...currentThoughts, thought].slice(-2)
+                  const updatedThoughts = [...currentThoughts, thought]
                   lastMsg.thoughts = updatedThoughts
                 }
               }
@@ -308,6 +348,7 @@ function App() {
         parsedContent: fullResponse,
         parsedChunks: parsedChunks
       })
+      setIsLoading(false)
       return true; // Signal completion
 
     } catch (error) {
@@ -443,15 +484,10 @@ function App() {
 
                   {/* Render Thoughts */}
                   {msg.thoughts && msg.thoughts.length > 0 && (
-                    <div className="thoughts-container">
-                      <div className="thoughts-header">Thinking Process:</div>
-                      {msg.thoughts.map((thought, i) => (
-                        <div key={i} className="thought-item">
-                          <span className="thought-dot"></span>
-                          {thought}
-                        </div>
-                      ))}
-                    </div>
+                    <ThinkingProcessAccordion
+                      thoughts={msg.thoughts}
+                      isComplete={index !== messages.length - 1 || !isLoading}
+                    />
                   )}
 
                   <div className="message-text">
