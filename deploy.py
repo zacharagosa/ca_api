@@ -14,9 +14,14 @@ print("Deploying agent to Agent Engine...")
 remote_app = reasoning_engines.ReasoningEngine.create(
     reasoning_engine=app,
     requirements=[
-        "google-cloud-aiplatform[adk,agent_engines]",
+        "google-cloud-aiplatform>=1.38.0",
+        "google-adk",
         "google-cloud-geminidataanalytics",
     ],
+    extra_packages=[
+        "./agent.py",
+    ],
+    display_name="CA_API",
 )
 
 print(f"Agent deployed successfully.")

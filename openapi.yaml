@@ -1,0 +1,48 @@
+openapi: 3.0.0
+info:
+  title: Gaming Analytics Data Tool
+  description: API to retrieve data insights from Looker for the gaming application.
+  version: 1.0.0
+servers:
+  - url: https://ca-api-1094200614711.us-central1.run.app
+paths:
+  /api/insights:
+    post:
+      summary: Get Data Insights
+      description: Queries the Looker semantic layer to answer a natural language question about gaming data.
+      operationId: getInsights
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                question:
+                  type: string
+                  description: The natural language question to ask (e.g., "What is the total revenue?").
+              required:
+                - question
+      responses:
+        '200':
+          description: Successful response with data insights.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  data_insights:
+                    type: array
+                    items:
+                      type: object
+                      description: Contains the query result, SQL, and metadata.
+                  text_insights:
+                    type: array
+                    items:
+                      type: string
+                  schema_insights:
+                    type: array
+                    items:
+                      type: object
