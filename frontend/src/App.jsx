@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
 import { useGoogleLogin } from '@react-oauth/google'
-import { Send, Bot, User, Loader2, Code, X, ExternalLink, ChevronDown, ChevronUp, Info } from 'lucide-react'
+import { Send, Bot, User, Loader2, Code, X, ExternalLink, ChevronDown, ChevronUp, Info, AlertTriangle } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
-import { Bar, Line, Pie } from 'react-chartjs-2';
+import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, ArcElement, Filler } from 'chart.js';
+import { Bar, Line, Pie, Scatter } from 'react-chartjs-2';
 
 ChartJS.register(
   CategoryScale,
@@ -15,7 +15,8 @@ ChartJS.register(
   Title,
   Tooltip,
   Legend,
-  ArcElement
+  ArcElement,
+  Filler
 );
 import './App.css'
 
@@ -73,21 +74,20 @@ const ChartRenderer = ({ config }) => {
     datasets: config.series.map((s, i) => ({
       label: s.name,
       data: config.data.map(item => item[s.dataKey]),
-      backgroundColor: s.fill || `hsla(${i * 60}, 70%, 50%, 0.5)`,
-      borderColor: s.fill || `hsla(${i * 60}, 70%, 50%, 1)`,
+      backgroundColor: s.fillColor || `hsla(${i * 60}, 70%, 50%, 0.5)`,
+      borderColor: s.strokeColor || `hsla(${i * 60}, 70%, 50%, 1)`,
       borderWidth: 1,
       yAxisID: s.yAxisID === 'right' ? 'y1' : 'y',
+      fill: config.type === 'area' || s.type === 'area',
     })),
   };
 
   const renderChart = () => {
-    switch (config.type) {
-      case 'bar':
-        return <Bar options={options} data={chartData} />;
-      case 'line':
-        return <Line options={options} data={chartData} />;
-      case 'pie':
-        // Pie charts need slightly different data structure for background colors
+    // Basic types
+    if (config.type === 'bar') return <Bar options={options} data={chartData} />;
+    if (config.type === 'line' || config.type === 'area') return <Line options={options} data={chartData} />;
+
+    if (config.type === 'pie') {
         const pieData = {
           ...chartData,
           datasets: chartData.datasets.map(ds => ({
@@ -97,9 +97,40 @@ const ChartRenderer = ({ config }) => {
           }))
         };
         return <Pie options={options} data={pieData} />;
-      default:
-        return null;
     }
+
+    if (config.type === 'scatter') {
+         const scatterData = {
+            datasets: config.series.map((s, i) => ({
+                label: s.name,
+                data: config.data.map(item => ({
+                    x: item[config.xAxisKey], // Ensure X is numeric for scatter
+                    y: item[s.dataKey]
+                })),
+                backgroundColor: s.fillColor || `hsla(${i * 60}, 70%, 50%, 0.5)`,
+            }))
+         }
+         return <Scatter options={options} data={scatterData} />;
+    }
+
+    if (config.type === 'combo') {
+        // Combo chart usually uses 'Bar' component with mixed types in datasets
+        const comboData = {
+            labels: config.data.map(item => item[config.xAxisKey]),
+            datasets: config.series.map((s, i) => ({
+                type: s.type || 'bar', // 'line' or 'bar'
+                label: s.name,
+                data: config.data.map(item => item[s.dataKey]),
+                backgroundColor: s.fillColor || `hsla(${i * 60}, 70%, 50%, 0.5)`,
+                borderColor: s.strokeColor || `hsla(${i * 60}, 70%, 50%, 1)`,
+                borderWidth: 1,
+                yAxisID: s.yAxisID === 'right' ? 'y1' : 'y',
+            }))
+        };
+        return <Bar options={options} data={comboData} />;
+    }
+
+    return null;
   };
 
   return (
@@ -295,6 +326,7 @@ function App() {
   const [showPayload, setShowPayload] = useState(false)
   const [lastRequest, setLastRequest] = useState(null)
   const [lastResponse, setLastResponse] = useState(null)
+  const [isLongQuery, setIsLongQuery] = useState(false);
   const messagesEndRef = useRef(null)
   // Generate a unique session ID when the component mounts
   const [sessionId] = useState(() => 'session_' + Math.random().toString(36).substr(2, 9))
@@ -338,8 +370,20 @@ function App() {
 
   useEffect(() => {
     scrollToBottom()
-  }, [messages])
+  }, [messages, isLongQuery])
 
+  useEffect(() => {
+    let timer;
+    if (isLoading) {
+      setIsLongQuery(false);
+      timer = setTimeout(() => {
+        setIsLongQuery(true);
+      }, 15000); // 15 seconds threshold
+    } else {
+      setIsLongQuery(false);
+    }
+    return () => clearTimeout(timer);
+  }, [isLoading]);
 
 
   const login = useGoogleLogin({
@@ -802,8 +846,16 @@ function App() {
                   </div>
                   <div className="message-text loading">
                     <Loader2 className="animate-spin" size={20} />
-                    <span>Analyzing data...</span>
+                    <span>
+                      {isLongQuery ? "Performing deep analysis..." : "Analyzing data..."}
+                    </span>
                   </div>
+                   {isLongQuery && (
+                    <div className="long-query-notice">
+                      <AlertTriangle size={16} />
+                      <span>This is a complex query. I'm digging through multiple data sources. This may take up to 30 seconds.</span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

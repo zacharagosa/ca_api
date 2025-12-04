@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 load_dotenv()
 import threading
 from google.cloud import geminidataanalytics
+from google.cloud import discoveryengine_v1beta as discoveryengine
+from google.api_core.client_options import ClientOptions
 from google.adk.agents import Agent
 from google.adk.tools import agent_tool
 import google.auth
@@ -21,6 +23,7 @@ LOOKML_MODEL = os.getenv("LOOKML_MODEL", "gaming")
 EXPLORE = os.getenv("EXPLORE", "events")
 PROJECT_ID = os.getenv("PROJECT_ID", "aragosalooker")
 LOCATION = os.getenv("LOCATION", "us-central1")
+DATA_STORE_ID = os.getenv("DATA_STORE_ID", "gaming-knowledge") # Default to a placeholder
 
 import queue
 from concurrent.futures import ThreadPoolExecutor
@@ -46,6 +49,67 @@ def set_access_token(token):
 def get_access_token():
     """Gets the Looker access token for the current thread."""
     return getattr(_thread_local, 'access_token', None)
+
+def search_knowledge_base(query: str):
+    """Searches the internal knowledge base (e.g., PDFs, Wiki, Reddit) for context.
+
+    Use this tool to get qualitative information, industry trends, or game mechanics info
+    that isn't in the Looker database.
+
+    Args:
+        query: The search query string.
+
+    Returns:
+        A list of search results with titles, snippets, and links.
+    """
+    log_thought(f"Searching Knowledge Base for: {query}")
+    try:
+        # Use ClientOptions to specify the location
+        client_options = (
+            ClientOptions(api_endpoint=f"{LOCATION}-discoveryengine.googleapis.com")
+            if LOCATION != "global"
+            else None
+        )
+
+        client = discoveryengine.SearchServiceClient(client_options=client_options)
+
+        serving_config = f"projects/{PROJECT_ID}/locations/{LOCATION}/collections/default_collection/dataStores/{DATA_STORE_ID}/servingConfigs/default_search"
+
+        request = discoveryengine.SearchRequest(
+            serving_config=serving_config,
+            query=query,
+            page_size=5,
+            content_search_spec=discoveryengine.SearchRequest.ContentSearchSpec(
+                snippet_spec=discoveryengine.SearchRequest.ContentSearchSpec.SnippetSpec(
+                    return_snippet=True
+                )
+            )
+        )
+
+        response = client.search(request)
+
+        results = []
+        for result in response.results:
+            item = {}
+            if hasattr(result.document, 'derived_struct_data'):
+                 item['title'] = result.document.derived_struct_data.get('title', 'No Title')
+                 item['link'] = result.document.derived_struct_data.get('link', '')
+                 # Handle snippets
+                 snippets = []
+                 if hasattr(result.document, 'derived_struct_data'):
+                     snippets_data = result.document.derived_struct_data.get('snippets', [])
+                     for s in snippets_data:
+                         snippets.append(s.get('snippet', ''))
+                 item['snippet'] = " ... ".join(snippets)
+            results.append(item)
+
+        log_thought(f"Found {len(results)} results from Knowledge Base.")
+        return results
+
+    except Exception as e:
+        log_thought(f"Error searching knowledge base: {e}")
+        return [{"error": str(e), "message": "Could not retrieve knowledge base results."}]
+
 
 def get_insights(question: str):
     """Queries the Conversational Analytics API using a question as input.
@@ -305,26 +369,45 @@ def run_deep_analysis(question: str):
         }
     )
     
-    looker_tool = Tool(
-        function_declarations=[get_insights_func]
+    search_kb_func = FunctionDeclaration(
+        name="search_knowledge_base",
+        description="Searches the internal knowledge base for qualitative context.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query."
+                }
+            },
+            "required": ["query"]
+        }
+    )
+
+    analysis_tools = Tool(
+        function_declarations=[get_insights_func, search_kb_func]
     )
 
     # Initialize the model
     model = GenerativeModel(
         "gemini-2.5-pro",
-        tools=[looker_tool],
+        tools=[analysis_tools],
         tool_config=ToolConfig(
             function_calling_config=ToolConfig.FunctionCallingConfig(
                 mode=ToolConfig.FunctionCallingConfig.Mode.AUTO,
             )
         ),
         system_instruction="""You are a Senior Data Analyst. The user has a complex request.
-        Your goal is to provide a comprehensive analysis by breaking down the problem, asking multiple questions to Looker, and synthesizing the results.
+        Your goal is to provide a comprehensive analysis by breaking down the problem, asking multiple questions to Looker AND the Knowledge Base, and synthesizing the results.
+
+        **Available Tools:**
+        - `get_insights(question)`: Queries the SQL database (Looker). Use for quantitative data (metrics, trends).
+        - `search_knowledge_base(query)`: Searches external docs/web. Use for qualitative context (e.g. "Why is X trending?", "What is the industry standard?").
         
         Process:
         1. Understand the user's high-level goal.
-        2. Formulate a plan with specific questions to ask Looker.
-        3. Use the `get_insights` tool to get data for each question. You can call it multiple times.
+        2. Formulate a plan.
+        3. Execute tool calls. **CRITICAL: Execute multiple tools in parallel** to save time.
         4. Analyze the returned data.
         5. Synthesize a final report.
         
@@ -371,8 +454,8 @@ def run_deep_analysis(question: str):
         response = chat.send_message(question)
         log_thought(f"Initial Plan Generated in {time.time() - t0:.2f}s")
         
-        # Loop for tool calls (max 10 turns to prevent infinite loops)
-        for _ in range(10):
+        # Loop for tool calls (max 5 turns to prevent infinite loops)
+        for _ in range(5):
             candidate = response.candidates[0]
             
             # Collect all function calls from all parts
@@ -403,6 +486,11 @@ def run_deep_analysis(question: str):
                                 question_arg = list(fn.args.values())[0] if fn.args else ""
                                 
                             futures.append(executor.submit(get_insights, question_arg))
+                        elif fn.name == "search_knowledge_base":
+                            query_arg = fn.args.get("query")
+                            if not query_arg:
+                                query_arg = list(fn.args.values())[0] if fn.args else ""
+                            futures.append(executor.submit(search_knowledge_base, query_arg))
                         else:
                             log_debug(f"Unknown tool: {fn.name}")
                             futures.append(None) # Handle unknown tools if necessary
@@ -518,8 +606,14 @@ visualization_agent = Agent(
     
     Choose the most appropriate chart type for the data.
     - Use "line" for trends over time.
+    - Use "area" (line chart with fill) for stacked trends over time (e.g. Stacked Revenue by Platform).
     - Use "bar" for categorical comparisons (Stacked or Grouped).
     - Use "pie" for parts of a whole (only if few categories).
+    - Use "scatter" for correlation analysis (e.g. Ad Spend vs Revenue) where both axes are numeric.
+    - Use "combo" for mixing types (e.g. Bar for Revenue, Line for ROI). For combo charts, specify "type": "bar" or "line" inside each series object.
+
+    **Styling:**
+    - For Area charts, set `"fill": true` in the series object.
     
     IMPORTANT: 
     1. You MUST use the actual data provided in the input. Do NOT use placeholder data.
@@ -562,6 +656,7 @@ unified_agent = Agent(
     tools=[
         get_insights,
         perform_deep_analysis,
+        search_knowledge_base,
         # Wrap the sub-agent as a tool
         agent_tool.AgentTool(agent=visualization_agent)
     ],
@@ -571,7 +666,15 @@ unified_agent = Agent(
 # to avoid hardcoding the staging bucket in the remote environment.
 
 # Create the App
-app = reasoning_engines.AdkApp(
-    agent=unified_agent,
-    enable_tracing=False,
-)
+try:
+    app = reasoning_engines.AdkApp(
+        agent=unified_agent,
+        enable_tracing=False,
+    )
+except Exception as e:
+    print(f"WARNING: Failed to initialize Vertex AI Agent: {e}")
+    # Fallback/Dummy app for when credentials are missing (e.g., in CI/CD or sandbox)
+    class DummyApp:
+        def query(self, *args, **kwargs):
+            return {"output": "Agent could not be initialized due to missing credentials."}
+    app = DummyApp()
