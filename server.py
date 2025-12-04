@@ -1,4 +1,5 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response, stream_with_context
+import json
 from flask_cors import CORS
 from agent import app as agent_app, PROJECT_ID, LOCATION
 import vertexai
@@ -40,6 +41,7 @@ def chat():
     print(f"Received request: {request.json}") # Debug log
     data = request.json
     user_input = data.get('message')
+    deep_analysis = data.get('deep_analysis', False)
     user_id = data.get('user_id', 'web_user')
     session_id = data.get('session_id', 'default_session') # Use session_id if provided, else default
     
@@ -80,8 +82,11 @@ def chat():
             if access_token:
                 agent.set_access_token(access_token)
 
+
             try:
+                # Always use the unified agent stream
                 stream = agent_app.stream_query(message=user_input, user_id=user_id, session_id=session_id)
+                
                 for chunk in stream:
                     response_queue.put(("chunk", chunk))
                 response_queue.put(("done", None))
@@ -111,12 +116,22 @@ def chat():
                     
                     if type_ == "chunk":
                         chunk = data
-                        if isinstance(chunk, dict) and "content" in chunk:
-                            content = chunk["content"]
-                            if "parts" in content:
-                                for part in content["parts"]:
-                                    if "text" in part:
-                                        yield f"DATA: {part['text']}\n"
+                        # Handle ADK Agent Chunk object
+                        if hasattr(chunk, 'text') and chunk.text:
+                             yield f"DATA: {chunk.text}\n"
+                        # Handle dictionary (legacy or deep analysis raw chunks if any)
+                        elif isinstance(chunk, dict):
+                            if "content" in chunk:
+                                content = chunk["content"]
+                                if "parts" in content:
+                                    for part in content["parts"]:
+                                        if "text" in part:
+                                            yield f"DATA: {part['text']}\n"
+                            elif "text" in chunk:
+                                yield f"DATA: {chunk['text']}\n"
+                        # Fallback for string
+                        elif isinstance(chunk, str):
+                             yield f"DATA: {chunk}\n"
                     elif type_ == "done":
                         break
                     elif type_ == "error":
@@ -217,5 +232,7 @@ def reauth():
         print(f"Reauth Error: {e}")
         return jsonify({'error': str(e)}), 500
 
+
+
 if __name__ == '__main__':
-    app.run(port=5001, debug=True)
+    app.run(debug=True, host='0.0.0.0', port=8080)

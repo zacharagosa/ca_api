@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useGoogleLogin } from '@react-oauth/google'
-import { Send, Bot, User, Loader2, Code, X, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react'
+import { Send, Bot, User, Loader2, Code, X, ExternalLink, ChevronDown, ChevronUp, Info } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, ArcElement } from 'chart.js';
@@ -19,11 +19,22 @@ ChartJS.register(
 );
 import './App.css'
 
+const API_BASE_URL = 'http://127.0.0.1:8080';
+
+import { TEST_QUESTIONS } from './test_questions';
+
+
 const ChartRenderer = ({ config }) => {
   if (!config || !config.data) return null;
 
+  const hasRightAxis = config.series.some(s => s.yAxisID === 'right');
+
   const options = {
     responsive: true,
+    interaction: {
+      mode: 'index',
+      intersect: false,
+    },
     plugins: {
       legend: {
         position: 'top',
@@ -32,6 +43,28 @@ const ChartRenderer = ({ config }) => {
         display: true,
         text: config.title,
       },
+    },
+    scales: {
+      x: {
+        stacked: config.stacked
+      },
+      y: {
+        type: 'linear',
+        display: true,
+        position: 'left',
+        stacked: config.stacked,
+      },
+      ...(hasRightAxis && {
+        y1: {
+          type: 'linear',
+          display: true,
+          position: 'right',
+          grid: {
+            drawOnChartArea: false,
+          },
+          stacked: config.stacked,
+        }
+      }),
     },
   };
 
@@ -43,6 +76,7 @@ const ChartRenderer = ({ config }) => {
       backgroundColor: s.fill || `hsla(${i * 60}, 70%, 50%, 0.5)`,
       borderColor: s.fill || `hsla(${i * 60}, 70%, 50%, 1)`,
       borderWidth: 1,
+      yAxisID: s.yAxisID === 'right' ? 'y1' : 'y',
     })),
   };
 
@@ -201,6 +235,56 @@ const ThinkingProcessAccordion = ({ thoughts, isComplete }) => {
   );
 };
 
+const TimingPopup = ({ timings }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const updateTimer = () => {
+      const end = timings.endTime || Date.now();
+      setElapsed((end - timings.startTime) / 1000);
+    };
+
+    updateTimer(); // Initial update
+
+    if (!timings.endTime) {
+      const interval = setInterval(updateTimer, 100);
+      return () => clearInterval(interval);
+    }
+  }, [timings.startTime, timings.endTime]);
+
+  if (!timings) return null;
+
+  return (
+    <div className="timing-wrapper">
+      <button className="timing-btn" onClick={() => setIsOpen(!isOpen)} title="Show Execution Timings">
+        <Info size={14} />
+        <span className="timing-badge">{Math.round(elapsed)}s</span>
+      </button>
+      {isOpen && (
+        <div className="timing-popup">
+          <div className="timing-header">
+            <h4>Execution Breakdown</h4>
+            <button onClick={() => setIsOpen(false)}><X size={14} /></button>
+          </div>
+          <div className="timing-list">
+            {timings.steps.map((step, i) => (
+              <div key={i} className="timing-item">
+                <span className="timing-label" title={step.label}>{step.label}</span>
+                <span className="timing-duration">{step.duration ? step.duration.toFixed(1) + 's' : (elapsed - (step.startTime - timings.startTime) / 1000).toFixed(1) + 's'}</span>
+              </div>
+            ))}
+            <div className="timing-total">
+              <span>Total Time</span>
+              <span>{elapsed.toFixed(1)}s</span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 function App() {
   const [messages, setMessages] = useState([
     { role: 'agent', content: 'Hello! I am your mobile gaming data analyst. How can I help you today?' }
@@ -217,14 +301,36 @@ function App() {
   const [isAutoTesting, setIsAutoTesting] = useState(false)
   const autoTestIntervalRef = useRef(null)
 
+  // State for Deep Test Suite
+  const [isTestModalOpen, setIsTestModalOpen] = useState(false);
+  const [testLogs, setTestLogs] = useState([]);
+  const [isRunningTests, setIsRunningTests] = useState(false);
+
   const STARTER_QUESTIONS = [
-    "What is the total revenue for the last 30 days?",
-    "Show me a trend of daily active users for the last week.",
-    "What are the top 3 games by revenue?",
-    "Break down the number of sessions by device platform."
+    "Analyze the revenue trend for the last 6 months vs user acquisition.",
+    "Show me total revenue by week broken down by platform.",
+  ];
+  const DEEP_TEST_QUESTIONS = [
+    { label: "UA Performance", question: "Analyze the ROAS (Return on Ad Spend) by Campaign for the last 30 days. Which campaigns are performing best and should be scaled?" },
+    { label: "Player Behavior", question: "Compare the average session length and retention rates (D1, D7) of paying users vs non-paying users for the game 'Looker Battle Royale' over the last 3 months." },
+    { label: "Market Trends", question: "What are the top 3 countries by revenue for the last quarter? For these countries, how does the ARPU compare?" },
+    { label: "Whale Demographics", question: "Identify the top 10% of users by total revenue. What is the breakdown of these users by Country and Platform? This helps us target high-value segments." },
+    { label: "Campaign Efficiency", question: "Compare the ROAS and D7 Retention Rate for the top 5 campaigns by spend. Which campaign offers the best balance of short-term return and long-term engagement?" },
+    { label: "Progression Impact", question: "Compare the Average Revenue Per User (ARPU) for users who have triggered the 'level_up' event at least 5 times vs those who haven't. Does deep progression correlate with higher spend?" },
+    { label: "Geo Opportunities", question: "List the top 5 countries by number of users. For these countries, calculate the Conversion Rate (Paying Users / Total Users). Which country has high volume but low monetization?" },
+    { label: "Platform Deep Dive", question: "Compare the Average Session Length and Total Revenue for 'iOS' vs 'Android' users. If one platform underperforms, break it down by Country to see if it's a regional issue." }
   ];
 
-  const TEST_QUESTIONS = STARTER_QUESTIONS;
+  const [isTestMenuOpen, setIsTestMenuOpen] = useState(false);
+
+  const runScenario = async (question) => {
+    setIsTestMenuOpen(false);
+    setInput(question);
+    // Wait a bit to show the question
+    await new Promise(r => setTimeout(r, 500));
+    // Submit
+    await handleSubmit(null, question);
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -234,8 +340,7 @@ function App() {
     scrollToBottom()
   }, [messages])
 
-  // Determine API base URL: localhost for dev, relative path for production
-  const API_BASE_URL = import.meta.env.DEV ? 'http://127.0.0.1:5001' : '';
+
 
   const login = useGoogleLogin({
     onSuccess: tokenResponse => {
@@ -277,12 +382,18 @@ function App() {
       })
 
       if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          logout();
+          throw new Error('Session expired. Please log in again.');
+        }
         const data = await response.json()
         throw new Error(data.error || 'Failed to fetch')
       }
       // Initialize empty agent message
       // Initialize empty agent message
-      setMessages(prev => [...prev, { role: 'agent', content: '', thoughts: [] }])
+      // Initialize empty agent message
+      const startTime = Date.now();
+      setMessages(prev => [...prev, { role: 'agent', content: '', thoughts: [], timings: { startTime, steps: [] } }])
       // setIsLoading(false) // Moved to end of stream
 
       const reader = response.body.getReader()
@@ -312,10 +423,35 @@ function App() {
 
           if (line.startsWith('THOUGHT: ')) {
             const thought = line.substring(9)
+
+            // Filter debug logs
+            if (thought.startsWith('Data Rows Count') ||
+              thought.startsWith('Stream processing complete') ||
+              thought.startsWith('Stream Chunk') ||
+              thought.startsWith('Chunk') ||
+              thought.startsWith('Debug')) {
+              continue;
+            }
+
+            const now = Date.now();
             setMessages(prev => {
               const newMessages = [...prev]
               const lastMsg = newMessages[newMessages.length - 1]
               if (lastMsg.role === 'agent') {
+                // Update timings
+                if (lastMsg.timings) {
+                  const steps = lastMsg.timings.steps;
+                  // Check for duplicate (same label as last step)
+                  const isDuplicate = steps.length > 0 && steps[steps.length - 1].label === thought;
+
+                  if (!isDuplicate) {
+                    if (steps.length > 0) {
+                      steps[steps.length - 1].duration = (now - steps[steps.length - 1].startTime) / 1000;
+                    }
+                    steps.push({ label: thought, startTime: now });
+                  }
+                }
+
                 const currentThoughts = lastMsg.thoughts || []
                 if (!currentThoughts.includes(thought)) {
                   const updatedThoughts = [...currentThoughts, thought]
@@ -379,6 +515,22 @@ function App() {
           }
         }
       }
+
+      // Finalize timings
+      const endTime = Date.now();
+      setMessages(prev => {
+        const newMessages = [...prev];
+        const lastMsg = newMessages[newMessages.length - 1];
+        if (lastMsg.role === 'agent' && lastMsg.timings) {
+          lastMsg.timings.endTime = endTime;
+          // Close last step
+          const steps = lastMsg.timings.steps;
+          if (steps.length > 0) {
+            steps[steps.length - 1].duration = (endTime - steps[steps.length - 1].startTime) / 1000;
+          }
+        }
+        return newMessages;
+      });
 
       // Update debug panel with detailed parsing info
       setLastResponse({
@@ -514,6 +666,30 @@ function App() {
             >
               {isAutoTesting ? 'Stop Test' : 'Auto Test'}
             </button>
+            <div className="test-menu-container">
+              <button
+                className={`reauth-btn ${isTestMenuOpen ? 'active' : ''}`}
+                onClick={() => setIsTestMenuOpen(!isTestMenuOpen)}
+                title="Select Deep Analysis Scenario"
+                style={{ background: '#10b981', borderColor: 'transparent' }}
+              >
+                Test Scenarios
+                {isTestMenuOpen ? <ChevronUp size={14} style={{ marginLeft: 4 }} /> : <ChevronDown size={14} style={{ marginLeft: 4 }} />}
+              </button>
+              {isTestMenuOpen && (
+                <div className="test-menu-dropdown">
+                  {DEEP_TEST_QUESTIONS.map((item, i) => (
+                    <button
+                      key={i}
+                      className="test-menu-item"
+                      onClick={() => runScenario(item.question)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <button
               className="reauth-btn"
               onClick={logout}
@@ -539,8 +715,11 @@ function App() {
               <div key={index} className={`message ${msg.role} `}>
                 <div className="message-content">
                   <div className="message-header">
-                    {msg.role === 'agent' ? <Bot size={16} /> : <User size={16} />}
-                    <span>{msg.role === 'agent' ? 'Analyst' : 'You'}</span>
+                    <div className="message-role">
+                      {msg.role === 'agent' ? <Bot size={16} /> : <User size={16} />}
+                      <span>{msg.role === 'agent' ? 'Analyst' : 'You'}</span>
+                    </div>
+                    {msg.role === 'agent' && msg.timings && <TimingPopup timings={msg.timings} />}
                   </div>
 
                   {/* Render Thoughts */}
@@ -668,6 +847,7 @@ function App() {
           </button>
         </form>
       </footer>
+
     </div>
   )
 }

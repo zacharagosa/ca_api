@@ -621,6 +621,7 @@ button:disabled {
   color: white;
   /* White on blue background */
 }
+
 /* Thinking Process Accordion */
 .thoughts-accordion {
   background-color: #f8f9fa;
@@ -659,6 +660,7 @@ button:disabled {
   padding: 12px;
   border-top: 1px solid #e9ecef;
   background-color: white;
+  text-align: left;
 }
 
 .login-container {
@@ -727,13 +729,13 @@ button:disabled {
   color: var(--text-primary);
   font-size: 0.95rem;
   line-height: 1.4;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
 .starter-card:hover {
   border-color: var(--primary-color);
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   background: var(--bg-color);
 }
 
@@ -760,7 +762,7 @@ button:disabled {
 }
 
 .chart-header:hover {
-  background: rgba(0,0,0,0.02);
+  background: rgba(0, 0, 0, 0.02);
 }
 
 .chart-content {
@@ -779,4 +781,147 @@ button:disabled {
   white-space: pre-wrap;
   border: 1px solid var(--border-color);
   color: var(--text-primary);
+}
+/* Test Scenarios Dropdown */
+.test-menu-container {
+  position: relative;
+  display: inline-block;
+}
+
+.test-menu-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+  min-width: 200px;
+  overflow: hidden;
+  animation: slideDown 0.2s ease-out;
+}
+
+.test-menu-item {
+  display: block;
+  width: 100%;
+  padding: 10px 16px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.test-menu-item:hover {
+  background: #334155;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Timing Popup */
+.timing-wrapper {
+  position: relative;
+  margin-left: auto;
+}
+
+.timing-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid #334155;
+  color: #94a3b8;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.timing-btn:hover {
+  background: #334155;
+  color: #e2e8f0;
+}
+
+.timing-popup {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
+  width: 280px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+  padding: 12px;
+  animation: slideDown 0.2s ease-out;
+}
+
+.timing-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #334155;
+}
+
+.timing-header h4 {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #e2e8f0;
+}
+
+.timing-header button {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 2px;
+}
+
+.timing-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.timing-item {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: #cbd5e1;
+}
+
+.timing-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.timing-duration {
+  font-family: monospace;
+  color: #10b981;
+}
+
+.timing-total {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #334155;
+  font-weight: bold;
+  color: #e2e8f0;
+  font-size: 0.85rem;
 }

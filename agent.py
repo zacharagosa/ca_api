@@ -1,5 +1,6 @@
 import os
 import json
+import time
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -8,9 +9,9 @@ from google.cloud import geminidataanalytics
 from google.adk.agents import Agent
 from google.adk.tools import agent_tool
 import google.auth
-import google.auth.transport.requests
 import vertexai
 from vertexai.preview import reasoning_engines
+from vertexai.generative_models import GenerativeModel, Tool, FunctionDeclaration, Part, ToolConfig
 
 # Configuration - In a real app, use environment variables
 LOOKER_CLIENT_ID = os.getenv("LOOKER_CLIENT_ID")
@@ -22,6 +23,7 @@ PROJECT_ID = os.getenv("PROJECT_ID", "aragosalooker")
 LOCATION = os.getenv("LOCATION", "us-central1")
 
 import queue
+from concurrent.futures import ThreadPoolExecutor
 thought_queue = None
 
 def log_debug(message):
@@ -61,27 +63,15 @@ def get_insights(question: str):
 
     data_chat_client = geminidataanalytics.DataChatServiceClient()
 
-    # Check for user-specific access token
-    user_token = get_access_token()
-    
-    if user_token:
-        log_debug("Using user-specific Looker access token.")
-        credentials = geminidataanalytics.Credentials(
-            oauth=geminidataanalytics.OAuthCredentials(
-                token=geminidataanalytics.OAuthCredentials.TokenBased(
-                    access_token=user_token
-                )
-            )
+    # Always use service account Looker credentials as we are using Google Sign-In for app auth
+    log_debug("Using service account Looker credentials.")
+    credentials = geminidataanalytics.Credentials(
+        oauth=geminidataanalytics.OAuthCredentials(
+            secret=geminidataanalytics.OAuthCredentials.SecretBased(
+                client_id=LOOKER_CLIENT_ID, client_secret=LOOKER_CLIENT_SECRET
+            ),
         )
-    else:
-        log_debug("Using service account Looker credentials.")
-        credentials = geminidataanalytics.Credentials(
-            oauth=geminidataanalytics.OAuthCredentials(
-                secret=geminidataanalytics.OAuthCredentials.SecretBased(
-                    client_id=LOOKER_CLIENT_ID, client_secret=LOOKER_CLIENT_SECRET
-                ),
-            )
-        )
+    )
 
     looker_explore_reference = geminidataanalytics.LookerExploreReference(
         looker_instance_uri=LOOKER_INSTANCE_URI, lookml_model=LOOKML_MODEL, explore=EXPLORE
@@ -137,10 +127,17 @@ def get_insights(question: str):
     schema_insights = []
     data_insights = []
 
-    log_thought("Processing results...")
+    log_thought("Executing Looker Query (this may take a moment)...")
     
     # Iterate through the stream
+    t_start_stream = time.time()
+    first_chunk_received = False
+    
     for i, item in enumerate(stream):
+        if not first_chunk_received:
+            log_thought(f"Time to First Chunk: {time.time() - t_start_stream:.2f}s")
+            first_chunk_received = True
+            
         kind = item._pb.WhichOneof("kind")
         log_debug(f"Stream Chunk {i} Kind: {kind}")
         
@@ -191,10 +188,12 @@ def get_insights(question: str):
              pass
     
     # Wait for stream to complete
+    log_thought(f"Stream Consumption Complete. Total Stream Time: {time.time() - t_start_stream:.2f}s")
     log_thought("Stream processing complete.")
     log_debug(f"Data Insights Chunks: {len(data_insights)}")
 
     # Post-process data_insights to merge chunks
+    t_post_process = time.time()
     merged_data = {}
     try:
         for d in data_insights:
@@ -238,6 +237,12 @@ def get_insights(question: str):
         log_thought(f"Error merging/serializing data: {e}")
         merged_data = {} 
 
+    except Exception as e:
+        log_thought(f"Error merging/serializing data: {e}")
+        merged_data = {} 
+        
+    log_thought(f"Local Post-Processing Time: {time.time() - t_post_process:.2f}s")
+
     # Build a descriptive response dictionary
     response = {"status": "success"}
     
@@ -278,57 +283,211 @@ def get_insights(question: str):
 
     return response
 
-# Agent to get data insights
-data_agent = Agent(
-    model="gemini-2.5-pro",
-    name="DataAgent",
-    description="Retrieves raw data from Looker based on user questions.",
-    instruction="""You are an agent that retrieves raw data. The tool 'get_insights' queries a governed semantic layer.
-    Your task is to call the 'get_insights' tool with the user's question.
+def run_deep_analysis(question: str):
+    """Runs a deep analysis using a planning agent loop."""
+    log_thought("Entering Deep Analysis Mode (Gemini 2.5)...")
     
-    The tool returns a dictionary. You need to extract three things:
-    1. The data records.
-    2. The 'explore_url'.
-    3. The 'metadata' (fields, filters, sorts) from the 'result' dictionary.
-    
-    Follow these steps precisely:
-    1. Access `data_insights` list from the tool output.
-    2. Access the first item in that list.
-    3. Access the `result` dictionary.
-    4. Extract `data` (list of records) from `result`.
-    5. Extract `explore_url` (string) from `result`.
-    6. Extract `schema` (fields), `filters`, and `sorts` from `result` if they exist.
-    
-    CRITICAL: You MUST return a JSON object containing all of these.
-    
-    Example output format:
-    {
-        "data": [{"date": "2023-01-01", "revenue": 100}, ...],
-        "explore_url": "https://looker.example.com/explore/...",
-        "metadata": {
-            "fields": [{"name": "view.field", "type": "sum"}],
-            "filters": {"view.date": "last 30 days"},
-            "sorts": ["view.date desc"]
+    # Define the tool for the LLM
+    # Initialize the model
+    # Define the tool for the LLM
+    get_insights_func = FunctionDeclaration(
+        name="get_insights",
+        description="Queries Looker for data insights based on a natural language question.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "The natural language question to ask Looker."
+                }
+            },
+            "required": ["question"]
         }
-    }
+    )
     
-    Do not add any other text. Just the raw JSON string.
-    """,
-    tools=[get_insights],
-)
+    looker_tool = Tool(
+        function_declarations=[get_insights_func]
+    )
+
+    # Initialize the model
+    model = GenerativeModel(
+        "gemini-2.5-pro",
+        tools=[looker_tool],
+        tool_config=ToolConfig(
+            function_calling_config=ToolConfig.FunctionCallingConfig(
+                mode=ToolConfig.FunctionCallingConfig.Mode.AUTO,
+            )
+        ),
+        system_instruction="""You are a Senior Data Analyst. The user has a complex request.
+        Your goal is to provide a comprehensive analysis by breaking down the problem, asking multiple questions to Looker, and synthesizing the results.
+        
+        Process:
+        1. Understand the user's high-level goal.
+        2. Formulate a plan with specific questions to ask Looker.
+        3. Use the `get_insights` tool to get data for each question. You can call it multiple times.
+        4. Analyze the returned data.
+        5. Synthesize a final report.
+        
+        **PERFORMANCE TIP:**
+        - It is much faster to run ONE complex query than multiple simple ones.
+        - If you suspect you might need a breakdown (e.g., by Country), include it in the initial query (e.g., "Group by Platform AND Country"). You can always aggregate the data yourself to answer the high-level question.
+        - You can output multiple `get_insights` calls in a single turn to run them in parallel.
+
+        **CRITICAL OUTPUT REQUIREMENTS:**
+
+        1. **Evidence & Links:**
+           - For every key finding, you MUST cite the source data.
+           - The `get_insights` tool returns an `explore_url` in the `data_insights`. You MUST include this as a link: `[View Source Query](explore_url)`.
+           
+        2. **Visualizations:**
+           - You MUST generate charts to visualize trends or comparisons.
+           - To create a chart, output a JSON code block (```json) containing the chart configuration.
+           - The JSON structure MUST be:
+             {
+               "type": "bar" | "line" | "pie",
+               "title": "Chart Title",
+               "xAxisKey": "category_column",
+               "stacked": true/false,
+               "data": [{"category_column": "Value", "series1": 10, "series2": 20}, ...],
+               "series": [{"dataKey": "series1", "name": "Series 1", "fill": "#8884d8", "yAxisID": "left" | "right"}, ...]
+             }
+           - Ensure data is pivoted correctly for the chart (one row per X-axis value).
+           - **Dual Axis**: If comparing two measures with different scales (e.g., Revenue vs Session Length), assign one series `"yAxisID": "right"`.
+           
+        3. **Report Structure:**
+           - **Executive Summary**: High-level answer.
+           - **Detailed Analysis**:
+             - **Finding 1**: Description.
+               - *Chart*: (Insert JSON block here)
+               - *Source*: [View Source Query](url)
+             - **Finding 2**: ...
+        """
+    )
+    
+    chat = model.start_chat()
+    
+    try:
+        t0 = time.time()
+        response = chat.send_message(question)
+        log_thought(f"Initial Plan Generated in {time.time() - t0:.2f}s")
+        
+        # Loop for tool calls (max 10 turns to prevent infinite loops)
+        for _ in range(10):
+            candidate = response.candidates[0]
+            
+            # Collect all function calls from all parts
+            function_calls = []
+            text_parts = []
+            
+            for part in candidate.content.parts:
+                if part.function_call:
+                    function_calls.append(part.function_call)
+                elif part.text:
+                    text_parts.append(part.text)
+
+            if function_calls:
+                log_thought(f"Deep Analysis: Executing {len(function_calls)} tool call(s)...")
+                
+                # Execute tools in parallel
+                with ThreadPoolExecutor() as executor:
+                    # Create a list of futures
+                    futures = []
+                    for fn in function_calls:
+                        log_debug(f"Tool Call: {fn.name}, Args: {fn.args}")
+                        if fn.name == "get_insights":
+                            # get_insights expects 'question', but the model might call it with 'query' or 'question'
+                            # The tool definition for get_insights has 'question'.
+                            question_arg = fn.args.get("question") or fn.args.get("query")
+                            if not question_arg:
+                                # Fallback if neither is present (shouldn't happen with correct schema)
+                                question_arg = list(fn.args.values())[0] if fn.args else ""
+                                
+                            futures.append(executor.submit(get_insights, question_arg))
+                        else:
+                            log_debug(f"Unknown tool: {fn.name}")
+                            futures.append(None) # Handle unknown tools if necessary
+
+                    # Collect results
+                    tool_responses = []
+                    for i, future in enumerate(futures):
+                        fn = function_calls[i]
+                        if future:
+                            try:
+                                result = future.result()
+                                tool_responses.append(
+                                    Part.from_function_response(
+                                        name=fn.name,
+                                        response={"content": result}
+                                    )
+                                )
+                            except Exception as e:
+                                tool_responses.append(
+                                    Part.from_function_response(
+                                        name=fn.name,
+                                        response={"content": f"Error: {str(e)}"}
+                                    )
+                                )
+                        else:
+                             # Unknown tool
+                             pass
+                
+                log_thought("Synthesizing findings...")
+                t_synth = time.time()
+                response = chat.send_message(tool_responses)
+                log_thought(f"Synthesis/Next Step Generated in {time.time() - t_synth:.2f}s")
+                
+            elif text_parts:
+                # Text response (Final answer)
+                # Combine all text parts
+                full_text = "".join(text_parts)
+                yield {'content': {'parts': [{'text': full_text}]}}
+                break
+            else:
+                # No content?
+                break
+    except Exception as e:
+        log_thought(f"Deep Analysis Error: {e}")
+        yield {'content': {'parts': [{'text': f"An error occurred during deep analysis: {e}"}]}}
+
+def perform_deep_analysis(question: str):
+    """Performs a deep, multi-step analysis for complex questions.
+    
+    Use this tool when the user asks for:
+    - Comparisons (e.g., "Compare X vs Y", "Analyze performance of A vs B")
+    - Root cause analysis (e.g., "Why did revenue drop?")
+    - Multi-dimensional breakdowns (e.g., "Break down by Country AND Platform")
+    - Open-ended exploration (e.g., "Find the top opportunities")
+    
+    Args:
+        question: The complex user question to analyze.
+        
+    Returns:
+        A comprehensive markdown report with charts and data.
+    """
+    full_report = ""
+    # We need to consume the generator here since tools must return a value, not a generator
+    for chunk in run_deep_analysis(question):
+        content = chunk.get('content', {})
+        parts = content.get('parts', [])
+        for part in parts:
+            text = part.get('text', '')
+            if text:
+                full_report += text
+    return full_report
 
 # Visualization Agent
 visualization_agent = Agent(
     model="gemini-2.5-pro",
     name="VisualizationAgent",
     description="Tool that generates the specific JSON configuration required for rendering charts. Use this whenever the user asks for a visualization or the data represents a trend.",
-    instruction="""You are a data visualization expert. Your task is to take raw data (in JSON format) and a user question, and generate a JSON configuration for a Recharts chart.
+    instruction="""You are a data visualization expert. Your task is to take raw data (in JSON format) and a user question, and generate a JSON configuration for a Chart.js chart.
     
     The output must be a valid JSON object with the following structure:
     {
-        "type": "bar" | "line" | "pie" | "area",
+        "type": "bar" | "line" | "pie",
         "title": "Chart Title",
         "xAxisKey": "key_for_x_axis",
+        "stacked": true | false,
         "data": [ ... the data array ... ],
         "series": [
             { "dataKey": "key_for_series_1", "name": "Series 1 Name", "fill": "#8884d8" },
@@ -336,9 +495,30 @@ visualization_agent = Agent(
         ]
     }
     
+    **Handling Data Pivoting (CRITICAL):**
+    Raw data often comes in "long" format (e.g., one row per date-category combination). 
+    Chart.js requires "wide" format (one row per date, with columns for each category).
+    
+    If the data has 2 dimensions (e.g., Date and Country) and 1 measure (e.g., Revenue):
+    1.  **Pivot the Data**: Transform the array so each X-axis value (Date) appears only once.
+    2.  **Create Columns**: The values of the second dimension (Country) become new keys in the object.
+        -   Input: `[{"date": "Jan", "country": "US", "rev": 100}, {"date": "Jan", "country": "UK", "rev": 50}]`
+        -   Output Data: `[{"date": "Jan", "US": 100, "UK": 50}]`
+    3.  **Generate Series**: Create a series for each unique value of the second dimension.
+        -   Series: `[{"dataKey": "US", "name": "US"}, {"dataKey": "UK", "name": "UK"}]`
+    
+    **Stacking vs Grouping (CRITICAL):**
+    -   **Stacked (`"stacked": true`)**: Use ONLY for **Additive** measures (e.g., Total Revenue, Total Sessions, Total Installs) where the sum of the series equals the total.
+    -   **Grouped (`"stacked": false`)**: Use for **Non-Additive** measures (e.g., Averages, Rates, Ratios, DAU, ARPU, Retention). Stacking these makes no sense.
+    
+    **Handling Dual Axes:**
+    If the chart compares two measures with different scales (e.g., "Revenue" in millions vs "Sessions" in thousands, or "Count" vs "Percentage"):
+    1.  Assign the primary measure to the left axis (default).
+    2.  Assign the secondary measure to the right axis by adding `"yAxisID": "right"` to its series object.
+    
     Choose the most appropriate chart type for the data.
     - Use "line" for trends over time.
-    - Use "bar" for categorical comparisons.
+    - Use "bar" for categorical comparisons (Stacked or Grouped).
     - Use "pie" for parts of a whole (only if few categories).
     
     IMPORTANT: 
@@ -350,63 +530,38 @@ visualization_agent = Agent(
 
 # ... (rest of the file)
 
-root_agent = Agent(
+# ... (rest of the file)
+
+unified_agent = Agent(
     model="gemini-2.5-pro",
-    name="CA_API",
-    instruction="""You are a helpful mobile gaming data analyst.
+    name="UnifiedAnalyticsAgent",
+    instruction="""You are an expert mobile gaming data analyst.
     
-    Your goal is to answer user questions about their game data.
+    Your goal is to answer user questions about their game data by choosing the best approach:
     
-    1.  **Use the `get_insights` tool** to retrieve data from Looker.
-    2.  **Analyze the tool output**:
-        -   Look for `data_insights` which contains the actual query results.
-        -   Look for `text_insights` for any additional context or SQL queries.
-    3.  **Answer the question**:
-        -   The `get_insights` tool will return a JSON object containing `data_insights` (a list).
-        -   **Step 1**: Access the first item in `data_insights`. Let's call this `insight`.
-        -   **Step 2**: **ALWAYS** output the `insight['result']['data']` list as a Markdown table.
-            -   If it's a single value, make a one-row table.
-            -   If it's multiple rows, make a full table.
-        -   **Step 3**: If the `data` list has multiple rows (e.g. time series, categories), **YOU MUST CALL** the `VisualizationAgent` tool.
-            -   Pass ONLY the `data` list (not the full object) to `VisualizationAgent` and wait for its response.
-        -   **Step 4**: Output the JSON returned by `VisualizationAgent` in a code block with the language `json-chart`.
-        -   **Step 5**: **CRITICAL**: Check for the `explore_url` in `insight['result']`. 
-            -   If found, output it on a new line prefixed with `LINK: `.
-            -   Example: `LINK: https://looker.example.com/...`
-        -   **Step 6**: Check for `metadata` (fields, filters, sorts).
-            -   **CRITICAL**: Look for metadata in `insight['query']['looker']`.
-            -   It should contain `fields`, `filters`, and `sorts`.
-            -   If found, output it in a code block with the language `json-metadata`.
-            -   **CRITICAL**: Ensure there is a blank line before and after the code block.
-            -   Example:
-                
-                ```json-metadata
-                { "fields": [...], "filters": [...], "sorts": [...] }
-                ```
-                
-        -   **Step 7**: Add a brief summary.
-        -   **Step 8**: Generate 2-3 relevant follow-up questions based on the data and user's intent. Output each on a new line prefixed with `SUGGESTION: `.
-        
-    4.  **Formatting**:
-        -   **CRITICAL**: You MUST output the data table.
-        -   **CRITICAL**: For charts, use the `json-chart` language tag.
-        -   **CRITICAL**: For metadata, use the `json-metadata` language tag.
-        -   **CRITICAL**: You MUST output the `LINK:` line if an explore_url exists.
-        -   **CRITICAL**: For suggestions, use the format: `SUGGESTION: What is...`
-          Example:
-          ```json-chart
-          { ... json from VisualizationAgent ... }
-          ```
-          LINK: https://looker.example.com/explore/...
-          SUGGESTION: Break this down by country?
-          SUGGESTION: Show me the top 5 games?
+    **DECISION LOGIC:**
+    1.  **IF** the question is simple, direct, or asks for a specific metric (e.g., "What is the DAU?", "Show me revenue by country"), **USE `get_insights`**.
+    2.  **IF** the question is complex, requires comparison, root cause analysis, or multi-step reasoning (e.g., "Compare iOS vs Android", "Why is retention dropping?", "Analyze the impact of X"), **USE `perform_deep_analysis`**.
     
-    5.  **Important**:
-        -   Do NOT hallucinate data. Use ONLY what is returned by the tools.
-        -   If the user asks for a chart, you MUST use the `VisualizationAgent`.
+    **PATH A: Simple Queries (`get_insights`)**
+    1.  Call `get_insights`.
+    2.  Output the data as a Markdown table.
+    3.  If appropriate, call `VisualizationAgent` to generate a chart.
+    4.  Output the chart JSON in a `json-chart` block.
+    5.  Output the `explore_url` as `LINK: <url>`.
+    6.  Output metadata in `json-metadata`.
+    
+    **PATH B: Deep Analysis (`perform_deep_analysis`)**
+    1.  Call `perform_deep_analysis`.
+    2.  Return the output EXACTLY as provided by the tool. Do not summarize or modify it, as it already contains the full report, charts, and links.
+    
+    **General Rules:**
+    -   Always be helpful and professional.
+    -   Do not hallucinate data.
     """,
     tools=[
-        get_insights, 
+        get_insights,
+        perform_deep_analysis,
         # Wrap the sub-agent as a tool
         agent_tool.AgentTool(agent=visualization_agent)
     ],
@@ -417,6 +572,6 @@ root_agent = Agent(
 
 # Create the App
 app = reasoning_engines.AdkApp(
-    agent=root_agent,
+    agent=unified_agent,
     enable_tracing=False,
 )
