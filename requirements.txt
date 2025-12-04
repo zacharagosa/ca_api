@@ -7,3 +7,4 @@ flask-cors
 requests
 python-dotenv
 google-genai
+google-cloud-discoveryengine>=0.13.0
