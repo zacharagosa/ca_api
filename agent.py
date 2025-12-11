@@ -6,11 +6,42 @@ from dotenv import load_dotenv
 load_dotenv()
 import threading
 from google.cloud import geminidataanalytics
-from google.cloud import discoveryengine_v1beta as discoveryengine
+
 from google.api_core.client_options import ClientOptions
 from google.adk.agents import Agent
 from google.adk.tools import agent_tool
 import google.auth
+from google.auth import default
+from google.auth.transport.requests import Request as gRequest
+
+class AuthTokenManager:
+    def __init__(self):
+        self._credentials = None
+        self.SCOPES = ['https://www.googleapis.com/auth/cloud-platform']
+
+    def get_credentials(self):
+        # Force reload if explicit reauth was requested widely or just standard check
+        if self._credentials is None:
+            self._credentials, _ = default(scopes=self.SCOPES)
+        
+        try:
+             if not self._credentials.valid:
+                self._credentials.refresh(gRequest())
+        except Exception as e:
+             print(f"DEBUG: Credential refresh failed ({e}), reloading from default...")
+             # Force reload if refresh fails (e.g. token revoked, file changed)
+             self._credentials, _ = default(scopes=self.SCOPES)
+             # Try refreshing the new one if needed (though default() usually gives fresh-ish)
+             if not self._credentials.valid:
+                 self._credentials.refresh(gRequest())
+             
+        return self._credentials
+
+    def get_auth_token(self) -> str:
+        return self.get_credentials().token
+
+# Global instance
+auth_manager = AuthTokenManager()
 import vertexai
 from vertexai.preview import reasoning_engines
 from vertexai.generative_models import GenerativeModel, Tool, FunctionDeclaration, Part, ToolConfig
@@ -21,9 +52,11 @@ LOOKER_CLIENT_SECRET = os.getenv("LOOKER_CLIENT_SECRET")
 LOOKER_INSTANCE_URI = os.getenv("LOOKER_INSTANCE_URI")
 LOOKML_MODEL = os.getenv("LOOKML_MODEL", "gaming")
 EXPLORE = os.getenv("EXPLORE", "events")
-PROJECT_ID = os.getenv("PROJECT_ID", "aragosalooker")
-LOCATION = os.getenv("LOCATION", "us-central1")
-DATA_STORE_ID = os.getenv("DATA_STORE_ID", "gaming-knowledge") # Default to a placeholder
+PROJECT_ID = os.getenv("PROJECT_ID", "1094200614711")
+if PROJECT_ID == "aragosalooker":
+    PROJECT_ID = "1094200614711" # Force numeric ID if default/old string is found
+LOCATION = os.getenv("LOCATION", "global")
+
 
 import queue
 from concurrent.futures import ThreadPoolExecutor
@@ -50,65 +83,7 @@ def get_access_token():
     """Gets the Looker access token for the current thread."""
     return getattr(_thread_local, 'access_token', None)
 
-def search_knowledge_base(query: str):
-    """Searches the internal knowledge base (e.g., PDFs, Wiki, Reddit) for context.
 
-    Use this tool to get qualitative information, industry trends, or game mechanics info
-    that isn't in the Looker database.
-
-    Args:
-        query: The search query string.
-
-    Returns:
-        A list of search results with titles, snippets, and links.
-    """
-    log_thought(f"Searching Knowledge Base for: {query}")
-    try:
-        # Use ClientOptions to specify the location
-        client_options = (
-            ClientOptions(api_endpoint=f"{LOCATION}-discoveryengine.googleapis.com")
-            if LOCATION != "global"
-            else None
-        )
-
-        client = discoveryengine.SearchServiceClient(client_options=client_options)
-
-        serving_config = f"projects/{PROJECT_ID}/locations/{LOCATION}/collections/default_collection/dataStores/{DATA_STORE_ID}/servingConfigs/default_search"
-
-        request = discoveryengine.SearchRequest(
-            serving_config=serving_config,
-            query=query,
-            page_size=5,
-            content_search_spec=discoveryengine.SearchRequest.ContentSearchSpec(
-                snippet_spec=discoveryengine.SearchRequest.ContentSearchSpec.SnippetSpec(
-                    return_snippet=True
-                )
-            )
-        )
-
-        response = client.search(request)
-
-        results = []
-        for result in response.results:
-            item = {}
-            if hasattr(result.document, 'derived_struct_data'):
-                 item['title'] = result.document.derived_struct_data.get('title', 'No Title')
-                 item['link'] = result.document.derived_struct_data.get('link', '')
-                 # Handle snippets
-                 snippets = []
-                 if hasattr(result.document, 'derived_struct_data'):
-                     snippets_data = result.document.derived_struct_data.get('snippets', [])
-                     for s in snippets_data:
-                         snippets.append(s.get('snippet', ''))
-                 item['snippet'] = " ... ".join(snippets)
-            results.append(item)
-
-        log_thought(f"Found {len(results)} results from Knowledge Base.")
-        return results
-
-    except Exception as e:
-        log_thought(f"Error searching knowledge base: {e}")
-        return [{"error": str(e), "message": "Could not retrieve knowledge base results."}]
 
 
 def get_insights(question: str):
@@ -124,8 +99,11 @@ def get_insights(question: str):
         the API, categorized by type (e.g., text_insights, data_insights) to make
         the output easier for an LLM to understand and process.
     """
-
-    data_chat_client = geminidataanalytics.DataChatServiceClient()
+ 
+    # INJECT CREDENTIALS HERE
+    data_chat_client = geminidataanalytics.DataChatServiceClient(
+        credentials=auth_manager.get_credentials()
+    )
 
     # Always use service account Looker credentials as we are using Google Sign-In for app auth
     log_debug("Using service account Looker credentials.")
@@ -369,23 +347,8 @@ def run_deep_analysis(question: str):
         }
     )
     
-    search_kb_func = FunctionDeclaration(
-        name="search_knowledge_base",
-        description="Searches the internal knowledge base for qualitative context.",
-        parameters={
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "The search query."
-                }
-            },
-            "required": ["query"]
-        }
-    )
-
     analysis_tools = Tool(
-        function_declarations=[get_insights_func, search_kb_func]
+        function_declarations=[get_insights_func]
     )
 
     # Initialize the model
@@ -402,7 +365,6 @@ def run_deep_analysis(question: str):
 
         **Available Tools:**
         - `get_insights(question)`: Queries the SQL database (Looker). Use for quantitative data (metrics, trends).
-        - `search_knowledge_base(query)`: Searches external docs/web. Use for qualitative context (e.g. "Why is X trending?", "What is the industry standard?").
         
         Process:
         1. Understand the user's high-level goal.
@@ -486,11 +448,6 @@ def run_deep_analysis(question: str):
                                 question_arg = list(fn.args.values())[0] if fn.args else ""
                                 
                             futures.append(executor.submit(get_insights, question_arg))
-                        elif fn.name == "search_knowledge_base":
-                            query_arg = fn.args.get("query")
-                            if not query_arg:
-                                query_arg = list(fn.args.values())[0] if fn.args else ""
-                            futures.append(executor.submit(search_knowledge_base, query_arg))
                         else:
                             log_debug(f"Unknown tool: {fn.name}")
                             futures.append(None) # Handle unknown tools if necessary
@@ -656,7 +613,7 @@ unified_agent = Agent(
     tools=[
         get_insights,
         perform_deep_analysis,
-        search_knowledge_base,
+
         # Wrap the sub-agent as a tool
         agent_tool.AgentTool(agent=visualization_agent)
     ],

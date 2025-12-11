@@ -1,0 +1,24 @@
+{
+  "name": "ca_api",
+  "version": "1.0.0",
+  "description": "This project is a conversational analytics agent that allows users to query their gaming data using natural language. It leverages Google Cloud's Vertex AI and Looker to provide insights, data tables, and visualizations.",
+  "main": "get_insights.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zacharagosa/ca_api.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/zacharagosa/ca_api/issues"
+  },
+  "homepage": "https://github.com/zacharagosa/ca_api#readme",
+  "dependencies": {
+    "@google-cloud/geminidataanalytics": "^0.2.0",
+    "dotenv": "^17.2.3"
+  }
+}

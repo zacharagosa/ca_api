@@ -1,61 +1,107 @@
 # Gaming Analytics Agent
 
-This project is a conversational analytics agent that allows users to query their gaming data using natural language. It leverages Google Cloud's Vertex AI and Looker to provide insights, data tables, and visualizations.
+This project is a sophisticated conversational analytics AI that enables users to query their gaming data using natural language. Built with **Google Cloud's Gemini 2.5 Pro**, **Vertex AI Reasoning Engines**, and **Looker**, it delivers real-time insights, interactive visualizations, and deep analytical reasoning.
+
+![Agent Demo](assets/demo_screenshot.png)
 
 ## Features
 
--   **Natural Language Queries**: Ask questions like "What is the total revenue for the last 30 days?" or "Show me a trend of daily active users".
--   **Real-time Streaming**: Responses are streamed to the frontend, providing immediate feedback.
--   **Thought Process**: The agent's internal "thoughts" (e.g., "Querying Looker...", "Processing results...") are displayed to the user.
--   **Data Visualization**: Automatically generates bar, line, and pie charts using Recharts based on the data returned.
--   **Markdown Tables**: Presents data in clean, readable Markdown tables.
--   **Auto-Test Mode**: A built-in feature to automatically cycle through a set of test questions to verify functionality.
--   **Re-authentication**: Includes a helper to refresh Google Cloud credentials if they expire.
+-   **Unified Analytics Agent**: A single, powerful agent that intelligently routes queries:
+    -   **Simple Queries**: Instantly retrieves metrics and trends (e.g., "What is the DAU?", "Show revenue by country").
+    -   **Deep Analysis**: Automatically triggers a multi-step reasoning plan for complex questions (e.g., "Compare iOS vs Android retention", "Why did revenue drop yesterday?"), breaking them down into sub-queries and synthesizing the results.
+-   **Looker Integration**: dynamic SQL generation and execution against your LookML models.
+-   **Interactive Visualizations**: Automatically requests and renders appropriate charts (Bar, Line, Pie) using Chart.js based on the data context.
+-   **Live Thinking Process**: Exposes the agent's internal monologue ("THOUGHT: Analyzing request...", "THOUGHT: Querying Looker for daily active users..."), building trust and transparency.
+-   **Structured Outputs**: Returns data in clean Markdown tables and rich JSON metadata for the frontend.
+-   **Re-authentication**: Built-in flow to handle Google Cloud credential refreshment seamlessly.
 
 ## Architecture
 
--   **Backend**: Python (Flask) server (`server.py`) that orchestrates the agent.
--   **Agent**: Built with Google's Agent Development Kit (ADK) and Vertex AI (`agent.py`). It uses a multi-agent architecture:
-    -   `RootAgent`: The main orchestrator that handles user interaction and formatting.
-    -   `DataAgent`: Retrieves raw data from Looker using the `get_insights` tool.
-    -   `VisualizationAgent`: Generates chart configurations from the data.
--   **Frontend**: React application (`frontend/`) that handles the chat interface, streaming, and rendering.
+-   **Backend**: Python (Flask) server (`server.py`) serving as the bridge between the frontend and the Vertex AI Reasoning Engine.
+-   **AI Core**: `agent.py` defines the `UnifiedAnalyticsAgent` using the Google ADK (Agent Development Kit).
+    -   **Model**: Gemini 2.5 Pro.
+    -   **Tools**:
+        -   `get_insights`: The primary tool for SQL generation and execution.
+        -   `perform_deep_analysis`: An implementation of a planning agent loop for complex tasks.
+        -   `VisualizatonAgent`: A specialized sub-agent for generating Chart.js configurations.
+-   **Frontend**: A modern React (Vite) application (`frontend/`) providing the chat interface, real-time streaming (using `StreamWithContext`), and chart rendering.
 
-## Setup & Running
+## Setup & Configuration
 
-1.  **Prerequisites**:
-    -   Python 3.11+
-    -   Node.js & npm
-    -   Google Cloud SDK (`gcloud`) installed and authenticated.
+### Prerequisites
+-   Python 3.11+
+-   Node.js 18+ & npm
+-   Google Cloud SDK (`gcloud`) installed and authorized.
+-   Access to a Google Cloud Project with Vertex AI enabled.
+-   A Looker instance and API credentials.
 
-2.  **Backend**:
+### Installation
+
+1.  **Clone the Repository**
     ```bash
-    # Install dependencies (if not already)
-    pip install -r requirements.txt
-    
-    # Run the server
-    python3 server.py
+    git clone <your-repo-url>
+    cd ca_api
     ```
-    The server runs on `http://127.0.0.1:5000`.
 
-3.  **Frontend**:
+2.  **Backend Setup**
+    ```bash
+    # Create and activate virtual environment
+    python3 -m venv venv
+    source venv/bin/activate
+
+    # Install Python dependencies
+    pip install -r requirements.txt
+    ```
+
+3.  **Environment Variables**
+    Create a `.env` file in the root directory with your credentials:
+    ```env
+    PROJECT_ID=your-google-cloud-project-id
+    LOCATION=global
+    LOOKER_CLIENT_ID=your_looker_client_id
+    LOOKER_CLIENT_SECRET=your_looker_client_secret
+    LOOKER_INSTANCE_URI=https://your-instance.looker.com
+    LOOKML_MODEL=gaming
+    EXPLORE=events
+    ```
+
+4.  **Frontend Setup**
     ```bash
     cd frontend
     npm install
+    ```
+
+## Running the Application
+
+1.  **Start the Backend Server**
+    In the root directory:
+    ```bash
+    source venv/bin/activate
+    python3 server.py
+    ```
+    *The server runs on `http://0.0.0.0:8080`*
+
+2.  **Start the Frontend**
+    In a new terminal:
+    ```bash
+    cd frontend
     npm run dev
     ```
-    The frontend runs on `http://localhost:5173`.
+    *Open `http://localhost:5173` in your browser.*
 
 ## Usage
 
-1.  Open the frontend URL.
-2.  Type a question in the chat box.
-3.  View the "Thinking Process" as the agent works.
-4.  See the results in text, table, and chart formats.
-5.  Use the "Auto Test" button to verify all features.
-6.  Use the "Re-auth" button if you encounter authentication errors.
+1.  Navigate to the local URL (http://localhost:5173).
+2.  If prompted, follow the instructions to authenticate using `gcloud auth application-default login`.
+3.  **Ask a Question**:
+    -   *Simple*: "What was the total revenue last week?"
+    -   *Complex*: "Analyze the performance difference between the US and UK markets for the past month."
+4.  **Explore Results**:
+    -   View the raw data in the generated Markdown table.
+    -   Interact with the generated charts.
+    -   Click "View Source Query" to open the exploration directly in Looker.
 
 ## Troubleshooting
 
--   **Authentication Errors**: If you see `RefreshError`, click the "Re-auth" button or run `gcloud auth application-default login` in your terminal.
--   **Port Conflicts**: If the server fails to start, ensure port 5000 is free.
+-   **"Reauthentication required"**: Click the "Re-auth" button in the UI or run `gcloud auth application-default login` manually.
+-   **Looker Errors**: Verify your `.env` credentials and ensure the `LOOKML_MODEL` and `EXPLORE` names match your Looker project.

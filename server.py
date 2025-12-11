@@ -235,4 +235,21 @@ def reauth():
 
 
 if __name__ == '__main__':
+    try:
+        print("Initializing Backend Authentication...")
+        token = agent.auth_manager.get_auth_token()
+        print("Backend Authentication Successful. Token obtained.")
+    except Exception as e:
+        print(f"WARNING: Backend Authentication failed on startup: {e}")
+        if "Reauthentication is needed" in str(e):
+            print("Attempting automatic re-authentication via browser...")
+            import subprocess
+            try:
+                # Automatically open the browser for authentication
+                subprocess.Popen(['gcloud', 'auth', 'application-default', 'login'])
+            except FileNotFoundError:
+                print("Error: 'gcloud' CLI not found. Please install Google Cloud SDK.")
+        else:
+            print("Server will start, but external API calls might fail if not authenticated.")
+
     app.run(debug=True, host='0.0.0.0', port=8080)
