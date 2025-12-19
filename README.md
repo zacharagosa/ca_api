@@ -1,8 +1,8 @@
 # Gaming Analytics Agent
 
-This project is a sophisticated conversational analytics AI that enables users to query their gaming data using natural language. Built with **Google Cloud's Gemini 2.5 Pro**, **Vertex AI Reasoning Engines**, and **Looker**, it delivers real-time insights, interactive visualizations, and deep analytical reasoning.
+This project is a sophisticated conversational analytics AI that enables users to query their gaming data using natural language. Built with **Google Cloud's Gemini 3 Pro**, **Vertex AI Reasoning Engines**, and **Looker**, it delivers real-time insights, interactive visualizations, and deep analytical reasoning.
 
-![Agent Demo](assets/demo_screenshot.png)
+![Agent Demo](assets/CA_demo.gif)
 
 ## Features
 
@@ -19,7 +19,7 @@ This project is a sophisticated conversational analytics AI that enables users t
 
 -   **Backend**: Python (Flask) server (`server.py`) serving as the bridge between the frontend and the Vertex AI Reasoning Engine.
 -   **AI Core**: `agent.py` defines the `UnifiedAnalyticsAgent` using the Google ADK (Agent Development Kit).
-    -   **Model**: Gemini 2.5 Pro.
+    -   **Model**: Gemini 3 Pro & Flash.
     -   **Tools**:
         -   `get_insights`: The primary tool for SQL generation and execution.
         -   `perform_deep_analysis`: An implementation of a planning agent loop for complex tasks.
