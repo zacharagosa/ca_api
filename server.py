@@ -2,7 +2,6 @@ from flask import Flask, request, jsonify, Response, stream_with_context
 import json
 from flask_cors import CORS
 from agent import app as agent_app, PROJECT_ID, LOCATION
-import vertexai
 import threading
 import queue
 import agent
@@ -10,12 +9,7 @@ import requests
 import urllib.parse
 agent.thought_queue = queue.Queue()
 
-# Initialize Vertex AI for local execution
-vertexai.init(
-    project=PROJECT_ID,
-    location=LOCATION,
-    staging_bucket="gs://ca_api",
-)
+# Vertex AI is initialized in agent.py to ensure it is configured before agent creation.
 
 app = Flask(__name__, static_folder='frontend/dist', static_url_path='')
 CORS(app, resources={r"/*": {"origins": "*"}})

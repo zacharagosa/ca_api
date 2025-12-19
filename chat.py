@@ -1,12 +1,6 @@
 from agent import app, PROJECT_ID, LOCATION
-import vertexai
 
-# Initialize Vertex AI for local execution
-vertexai.init(
-    project=PROJECT_ID,
-    location=LOCATION,
-    staging_bucket="gs://ca_api",
-)
+# Vertex AI is initialized in agent.py
 
 def main():
     print("Starting chat with Data Agent. Type 'exit' to quit.")

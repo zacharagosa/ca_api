@@ -7,10 +7,8 @@ load_dotenv()
 import threading
 from google.cloud import geminidataanalytics
 
-from google.api_core.client_options import ClientOptions
 from google.adk.agents import Agent
 from google.adk.tools import agent_tool
-import google.auth
 from google.auth import default
 from google.auth.transport.requests import Request as gRequest
 
@@ -56,6 +54,11 @@ PROJECT_ID = os.getenv("PROJECT_ID", "1094200614711")
 if PROJECT_ID == "aragosalooker":
     PROJECT_ID = "1094200614711" # Force numeric ID if default/old string is found
 LOCATION = os.getenv("LOCATION", "global")
+vertexai.init(
+    project=PROJECT_ID,
+    location=LOCATION,
+    staging_bucket="gs://ca_api",
+)
 
 
 import queue
@@ -327,7 +330,7 @@ def get_insights(question: str):
 
 def run_deep_analysis(question: str):
     """Runs a deep analysis using a planning agent loop."""
-    log_thought("Entering Deep Analysis Mode (Gemini 2.5)...")
+    log_thought("Entering Deep Analysis Mode (Gemini 3.0 Pro)...")
     
     # Define the tool for the LLM
     # Initialize the model
@@ -353,7 +356,7 @@ def run_deep_analysis(question: str):
 
     # Initialize the model
     model = GenerativeModel(
-        "gemini-2.5-pro",
+        "gemini-3-pro-preview",
         tools=[analysis_tools],
         tool_config=ToolConfig(
             function_calling_config=ToolConfig.FunctionCallingConfig(
@@ -522,7 +525,7 @@ def perform_deep_analysis(question: str):
 
 # Visualization Agent
 visualization_agent = Agent(
-    model="gemini-2.5-pro",
+    model="gemini-3-flash-preview",
     name="VisualizationAgent",
     description="Tool that generates the specific JSON configuration required for rendering charts. Use this whenever the user asks for a visualization or the data represents a trend.",
     instruction="""You are a data visualization expert. Your task is to take raw data (in JSON format) and a user question, and generate a JSON configuration for a Chart.js chart.
@@ -579,12 +582,10 @@ visualization_agent = Agent(
     """
 )
 
-# ... (rest of the file)
 
-# ... (rest of the file)
 
 unified_agent = Agent(
-    model="gemini-2.5-pro",
+    model="gemini-3-pro-preview",
     name="UnifiedAnalyticsAgent",
     instruction="""You are an expert mobile gaming data analyst.
     

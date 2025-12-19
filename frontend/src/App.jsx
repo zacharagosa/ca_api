@@ -20,7 +20,7 @@ ChartJS.register(
 );
 import './App.css'
 
-const API_BASE_URL = 'http://127.0.0.1:8080';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 import { TEST_QUESTIONS } from './test_questions';
 
@@ -88,46 +88,46 @@ const ChartRenderer = ({ config }) => {
     if (config.type === 'line' || config.type === 'area') return <Line options={options} data={chartData} />;
 
     if (config.type === 'pie') {
-        const pieData = {
-          ...chartData,
-          datasets: chartData.datasets.map(ds => ({
-            ...ds,
-            backgroundColor: config.data.map((_, i) => `hsla(${i * 45}, 70%, 50%, 0.5)`),
-            borderColor: config.data.map((_, i) => `hsla(${i * 45}, 70%, 50%, 1)`),
-          }))
-        };
-        return <Pie options={options} data={pieData} />;
+      const pieData = {
+        ...chartData,
+        datasets: chartData.datasets.map(ds => ({
+          ...ds,
+          backgroundColor: config.data.map((_, i) => `hsla(${i * 45}, 70%, 50%, 0.5)`),
+          borderColor: config.data.map((_, i) => `hsla(${i * 45}, 70%, 50%, 1)`),
+        }))
+      };
+      return <Pie options={options} data={pieData} />;
     }
 
     if (config.type === 'scatter') {
-         const scatterData = {
-            datasets: config.series.map((s, i) => ({
-                label: s.name,
-                data: config.data.map(item => ({
-                    x: item[config.xAxisKey], // Ensure X is numeric for scatter
-                    y: item[s.dataKey]
-                })),
-                backgroundColor: s.fillColor || `hsla(${i * 60}, 70%, 50%, 0.5)`,
-            }))
-         }
-         return <Scatter options={options} data={scatterData} />;
+      const scatterData = {
+        datasets: config.series.map((s, i) => ({
+          label: s.name,
+          data: config.data.map(item => ({
+            x: item[config.xAxisKey], // Ensure X is numeric for scatter
+            y: item[s.dataKey]
+          })),
+          backgroundColor: s.fillColor || `hsla(${i * 60}, 70%, 50%, 0.5)`,
+        }))
+      }
+      return <Scatter options={options} data={scatterData} />;
     }
 
     if (config.type === 'combo') {
-        // Combo chart usually uses 'Bar' component with mixed types in datasets
-        const comboData = {
-            labels: config.data.map(item => item[config.xAxisKey]),
-            datasets: config.series.map((s, i) => ({
-                type: s.type || 'bar', // 'line' or 'bar'
-                label: s.name,
-                data: config.data.map(item => item[s.dataKey]),
-                backgroundColor: s.fillColor || `hsla(${i * 60}, 70%, 50%, 0.5)`,
-                borderColor: s.strokeColor || `hsla(${i * 60}, 70%, 50%, 1)`,
-                borderWidth: 1,
-                yAxisID: s.yAxisID === 'right' ? 'y1' : 'y',
-            }))
-        };
-        return <Bar options={options} data={comboData} />;
+      // Combo chart usually uses 'Bar' component with mixed types in datasets
+      const comboData = {
+        labels: config.data.map(item => item[config.xAxisKey]),
+        datasets: config.series.map((s, i) => ({
+          type: s.type || 'bar', // 'line' or 'bar'
+          label: s.name,
+          data: config.data.map(item => item[s.dataKey]),
+          backgroundColor: s.fillColor || `hsla(${i * 60}, 70%, 50%, 0.5)`,
+          borderColor: s.strokeColor || `hsla(${i * 60}, 70%, 50%, 1)`,
+          borderWidth: 1,
+          yAxisID: s.yAxisID === 'right' ? 'y1' : 'y',
+        }))
+      };
+      return <Bar options={options} data={comboData} />;
     }
 
     return null;
@@ -850,7 +850,7 @@ function App() {
                       {isLongQuery ? "Performing deep analysis..." : "Analyzing data..."}
                     </span>
                   </div>
-                   {isLongQuery && (
+                  {isLongQuery && (
                     <div className="long-query-notice">
                       <AlertTriangle size={16} />
                       <span>This is a complex query. I'm digging through multiple data sources. This may take up to 30 seconds.</span>

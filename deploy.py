@@ -1,13 +1,7 @@
 from vertexai.preview import reasoning_engines
-import vertexai
 from agent import app, PROJECT_ID, LOCATION
 
-# Initialize Vertex AI for deployment
-vertexai.init(
-    project=PROJECT_ID,
-    location=LOCATION,
-    staging_bucket="gs://ca_api",
-)
+# Vertex AI is initialized in agent.py
 
 print("Deploying agent to Agent Engine...")
 
