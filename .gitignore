@@ -6,3 +6,6 @@ __pycache__/
 downloaded-logs-*.json
 inspect_lib.py
 inspect_lib_2.py
+
+node_modules/
+frontend/node_modules/
