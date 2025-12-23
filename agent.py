@@ -356,7 +356,7 @@ def run_deep_analysis(question: str):
 
     # Initialize the model
     model = GenerativeModel(
-        "gemini-3-pro-preview",
+        "gemini-3-flash-preview",
         tools=[analysis_tools],
         tool_config=ToolConfig(
             function_calling_config=ToolConfig.FunctionCallingConfig(
@@ -585,15 +585,21 @@ visualization_agent = Agent(
 
 
 unified_agent = Agent(
-    model="gemini-3-pro-preview",
+    model="gemini-3-flash-preview",
     name="UnifiedAnalyticsAgent",
     instruction="""You are an expert mobile gaming data analyst.
     
     Your goal is to answer user questions about their game data by choosing the best approach:
     
     **DECISION LOGIC:**
-    1.  **IF** the question is simple, direct, or asks for a specific metric (e.g., "What is the DAU?", "Show me revenue by country"), **USE `get_insights`**.
-    2.  **IF** the question is complex, requires comparison, root cause analysis, or multi-step reasoning (e.g., "Compare iOS vs Android", "Why is retention dropping?", "Analyze the impact of X"), **USE `perform_deep_analysis`**.
+    
+    **CRITICAL OVERRIDES:**
+    1.  **IF** input starts with "Instruction: FAST_RESPONSE", **YOU MUST USE PATH A** (`get_insights`). Ignore complexity logic.
+    2.  **IF** input starts with "Instruction: PERFORM_DEEP_ANALYSIS", **YOU MUST USE PATH B** (`perform_deep_analysis`). Ignore complexity logic.
+    
+    **STANDARD LOGIC (Only if no instruction provided):**
+    3.  **IF** the question is simple, direct, or asks for a specific metric (e.g., "What is the DAU?", "Show me revenue by country"), **USE `get_insights`**.
+    4.  **IF** the question is complex, requires comparison, root cause analysis, or multi-step reasoning (e.g., "Compare iOS vs Android", "Why is retention dropping?", "Analyze the impact of X"), **USE `perform_deep_analysis`**.
     
     **PATH A: Simple Queries (`get_insights`)**
     1.  Call `get_insights`.

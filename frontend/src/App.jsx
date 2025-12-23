@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useGoogleLogin } from '@react-oauth/google'
-import { Send, Bot, User, Loader2, Code, X, ExternalLink, ChevronDown, ChevronUp, Info, AlertTriangle } from 'lucide-react'
+import { Send, Bot, User, Loader2, Code, X, ExternalLink, ChevronDown, ChevronUp, Info, AlertTriangle, LayoutDashboard, MessageSquare, Menu, ChevronRight, Maximize2, Minimize2, LogOut, Zap, Brain, RefreshCw } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, ArcElement, Filler } from 'chart.js';
@@ -23,6 +23,7 @@ import './App.css'
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 import { TEST_QUESTIONS } from './test_questions';
+import { DASHBOARDS } from './config/dashboards';
 
 
 const ChartRenderer = ({ config }) => {
@@ -302,7 +303,7 @@ const TimingPopup = ({ timings }) => {
             {timings.steps.map((step, i) => (
               <div key={i} className="timing-item">
                 <span className="timing-label" title={step.label}>{step.label}</span>
-                <span className="timing-duration">{step.duration ? step.duration.toFixed(1) + 's' : (elapsed - (step.startTime - timings.startTime) / 1000).toFixed(1) + 's'}</span>
+                <span className="timing-duration">{step.duration ? step.duration.toFixed(1) + 's' : ''}</span>
               </div>
             ))}
             <div className="timing-total">
@@ -316,6 +317,41 @@ const TimingPopup = ({ timings }) => {
   );
 };
 
+// Helper component for signed Looker links
+const LookerLink = ({ url }) => {
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleClick = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/embed`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_url: url })
+      });
+
+      if (!response.ok) throw new Error('Signing failed');
+
+      const data = await response.json();
+      window.open(data.url, '_blank');
+    } catch (err) {
+      console.error("Failed to open Looker link:", err);
+      // Fallback to trying to open original if signing fails (though likely won't work for embed users)
+      window.open(url, '_blank');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <a href={url} onClick={handleClick} className="action-link" style={{ cursor: 'pointer', opacity: isLoading ? 0.7 : 1 }}>
+      {isLoading ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />}
+      {isLoading ? ' Opening...' : ' View Source Query'}
+    </a>
+  );
+};
+
 function App() {
   const [messages, setMessages] = useState([
     { role: 'agent', content: 'Hello! I am your mobile gaming data analyst. How can I help you today?' }
@@ -323,9 +359,7 @@ function App() {
   const [accessToken, setAccessToken] = useState(localStorage.getItem('looker_access_token'))
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [showPayload, setShowPayload] = useState(false)
-  const [lastRequest, setLastRequest] = useState(null)
-  const [lastResponse, setLastResponse] = useState(null)
+  const [isDeepMode, setIsDeepMode] = useState(false) // Toggle state
   const [isLongQuery, setIsLongQuery] = useState(false);
   const messagesEndRef = useRef(null)
   // Generate a unique session ID when the component mounts
@@ -337,6 +371,7 @@ function App() {
   const [isTestModalOpen, setIsTestModalOpen] = useState(false);
   const [testLogs, setTestLogs] = useState([]);
   const [isRunningTests, setIsRunningTests] = useState(false);
+  const [currentThought, setCurrentThought] = useState(null); // Track live status
 
   const STARTER_QUESTIONS = [
     "Analyze the revenue trend for the last 6 months vs user acquisition.",
@@ -364,6 +399,61 @@ function App() {
     await handleSubmit(null, question);
   };
 
+  const [activeDashboard, setActiveDashboard] = useState('overview'); // Changed to use ID
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
+  const [sidebarWidth, setSidebarWidth] = useState(600);
+  const [isResizing, setIsResizing] = useState(false);
+
+  // LOOKER SIGNED URL STATE
+  const [signedUrl, setSignedUrl] = useState(null);
+  const [embedError, setEmbedError] = useState(null);
+  const sidebarRef = useRef(null);
+
+  // Ref to track resize state in event listeners without dependency issues
+  const isResizingRef = useRef(false);
+
+  const startResizing = (e) => {
+    e.preventDefault();
+    setIsResizing(true);
+    isResizingRef.current = true;
+    // Add overlay to body to prevent iframe capturing events
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  };
+
+  useEffect(() => {
+    const resize = (e) => {
+      if (isResizingRef.current) {
+        const newWidth = window.innerWidth - e.clientX;
+        if (newWidth > 350 && newWidth < 1200) {
+          setSidebarWidth(newWidth);
+        }
+      }
+    };
+
+    const stopResizing = () => {
+      if (isResizingRef.current) {
+        setIsResizing(false);
+        isResizingRef.current = false;
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      }
+    };
+
+    window.addEventListener('mousemove', resize);
+    window.addEventListener('mouseup', stopResizing);
+    window.addEventListener('mouseleave', stopResizing); // Stop if mouse leaves window
+
+    return () => {
+      window.removeEventListener('mousemove', resize);
+      window.removeEventListener('mouseup', stopResizing);
+      window.removeEventListener('mouseleave', stopResizing);
+    };
+  }, []);
+
+
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }
@@ -385,6 +475,50 @@ function App() {
     return () => clearTimeout(timer);
   }, [isLoading]);
 
+  // Fetch Signed URL when dashboard or token changes
+  useEffect(() => {
+    const fetchSignedUrl = async () => {
+      if (!activeDashboard || !accessToken) return;
+
+      const dashboard = DASHBOARDS.find(d => d.id === activeDashboard);
+      if (!dashboard) return;
+
+      try {
+        setEmbedError(null);
+        // Don't clear URL immediately to avoid flash if possible, but for security/logic:
+        setSignedUrl(null);
+
+        const requestPayload = { target_url: dashboard.url };
+        console.log('Fetching signed embed URL for:', dashboard.url);
+
+        const response = await fetch(`${API_BASE_URL}/api/embed`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            // We don't necessarily strictly need auth for this particular demo endpoint, 
+            // but good practice to pass if we had middleware.
+            // For now server.py assumes it's open or internal. 
+          },
+          body: JSON.stringify(requestPayload)
+        });
+
+        if (!response.ok) {
+          const err = await response.json();
+          throw new Error(err.error || 'Failed to sign embed URL');
+        }
+
+        const data = await response.json();
+        setSignedUrl(data.url);
+
+      } catch (e) {
+        console.error("Embed Error:", e);
+        setEmbedError(e.message);
+      }
+    };
+
+    fetchSignedUrl();
+  }, [activeDashboard, accessToken]); // Dependency on activeDashboard and login state
+
 
   const login = useGoogleLogin({
     onSuccess: tokenResponse => {
@@ -397,22 +531,22 @@ function App() {
   });
 
   // Refactored handleSubmit to accept an optional message argument and return a promise
-  const handleSubmit = async (e, manualMessage = null) => {
+  const handleSubmit = async (e, manualMessage = null, options = {}) => {
     if (e) e.preventDefault()
     const userMessage = manualMessage || input
     if (!userMessage.trim()) return false
 
-    setMessages(prev => [...prev, { role: 'user', content: userMessage }])
-    setInput('')
+    setMessages(prev => [...prev, { role: 'user', content: userMessage, timestamp: new Date() }])
+    if (!manualMessage) setInput('')
     setIsLoading(true)
 
     const requestPayload = {
       message: userMessage,
-      session_id: sessionId
+      session_id: sessionId,
+      deep_analysis: isDeepMode,
+      force_refresh: options.forceRefresh || false
     }
     console.log('Sending request:', requestPayload)
-    setLastRequest(requestPayload)
-    setLastResponse(null)
 
     try {
       console.log(`Fetching from ${API_BASE_URL}/chat...`)
@@ -473,9 +607,13 @@ function App() {
               thought.startsWith('Stream processing complete') ||
               thought.startsWith('Stream Chunk') ||
               thought.startsWith('Chunk') ||
-              thought.startsWith('Debug')) {
+              thought.startsWith('Debug') ||
+              thought.startsWith('Time to') ||
+              thought.startsWith('Local Post-Processing')) {
               continue;
             }
+
+            setCurrentThought(thought); // Update status indicator
 
             const now = Date.now();
             setMessages(prev => {
@@ -577,18 +715,14 @@ function App() {
       });
 
       // Update debug panel with detailed parsing info
-      setLastResponse({
-        fullRawResponse: parsedChunks.join('\n'),
-        parsedContent: fullResponse,
-        parsedChunks: parsedChunks
-      })
+      // setLastResponse removed
       setIsLoading(false)
       return true; // Signal completion
 
     } catch (error) {
       console.error('Error:', error)
       setMessages(prev => [...prev, { role: 'agent', content: 'Sorry, I encountered an error processing your request.' }])
-      setLastResponse({ error: error.message })
+      // setLastResponse({ error: error.message })
       setIsLoading(false)
       return false;
     }
@@ -644,29 +778,57 @@ function App() {
   const markdownComponents = useRef({
     code({ node, inline, className, children, ...props }) {
       const match = /language-(\w+)/.exec(className || '')
+      const lang = match ? match[1] : '';
+
+      // Helper to clean JSON string (remove comments, trailing commas)
+      const cleanJson = (str) => {
+        try {
+          return str.replace(/\/\/.*$/gm, '') // Remove single line comments
+            .replace(/\/\*[\s\S]*?\*\//g, '') // Remove multi line comments
+            .replace(/,(\s*[}\]])/g, '$1') // Remove trailing commas
+            .trim();
+        } catch (e) {
+          return str;
+        }
+      };
 
       // Handle Chart
-      const isChart = !inline && match && (match[1] === 'json-chart' || (match[1] === 'json' && String(children).includes('"type":')));
+      const isChart = !inline && (lang === 'json-chart' || (lang === 'json' && String(children).includes('"type":')));
       if (isChart) {
         try {
-          const config = JSON.parse(String(children).replace(/\n$/, ''))
+          const jsonStr = cleanJson(String(children));
+          const config = JSON.parse(jsonStr);
           if (config.type && config.data && config.series) {
             return <ChartRenderer config={config} />
           }
         } catch (e) {
-          return <code className={className} {...props}>{children}</code>
+          console.error("Chart JSON Parse Error:", e);
+          // Fallthrough to render as code if parsing fails
         }
       }
 
       // Handle Metadata
-      const isMetadata = !inline && match && (match[1] === 'json-metadata' || (match[1] === 'json' && String(children).includes('"fields":')));
+      const isMetadata = !inline && (lang === 'json-metadata' || (lang === 'json' && String(children).includes('"fields":')));
       if (isMetadata) {
         try {
-          const metadata = JSON.parse(String(children).replace(/\n$/, ''))
+          const jsonStr = cleanJson(String(children));
+          const metadata = JSON.parse(jsonStr);
           return <MetadataAccordion metadata={metadata} />
         } catch (e) {
-          return <code className={className} {...props}>{children}</code>
+          console.error("Metadata JSON Parse Error:", e);
+          // Fallthrough
         }
+      }
+
+      // Handle SQL
+      if (!inline && lang === 'sql') {
+        return (
+          <ContentAccordion title="Generated SQL">
+            <div className="sql-code">
+              <code className={className} {...props}>{children}</code>
+            </div>
+          </ContentAccordion>
+        )
       }
 
       return <code className={className} {...props}>{children}</code>
@@ -688,218 +850,342 @@ function App() {
   if (!accessToken) {
     return (
       <div className="login-container">
-        <h1>Gaming Analytics Agent</h1>
-        <button onClick={() => login()} className="login-btn">
-          Log-in to Looker
-        </button>
+        <div className="login-card glass">
+          <h1>Gaming Analytics</h1>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem' }}>Sign in to access your organization dashboard</p>
+          <button onClick={() => login()} className="login-btn">
+            Connect to Looker
+          </button>
+        </div>
       </div>
     )
   }
 
+  const currentDashboard = DASHBOARDS.find(d => d.id === activeDashboard);
+
   return (
     <div className="app-container">
-      <header className="header">
-        <div className="header-content">
-          <Bot className="bot-icon" />
-          <h1>Gaming Analytics Agent</h1>
-          <div className="header-actions">
-            <button
-              className={`reauth-btn ${isAutoTesting ? 'active' : ''}`}
-              onClick={() => setIsAutoTesting(!isAutoTesting)}
-              title="Start/Stop Auto Test"
-            >
-              {isAutoTesting ? 'Stop Test' : 'Auto Test'}
-            </button>
-            <div className="test-menu-container">
-              <button
-                className={`reauth-btn ${isTestMenuOpen ? 'active' : ''}`}
-                onClick={() => setIsTestMenuOpen(!isTestMenuOpen)}
-                title="Select Deep Analysis Scenario"
-                style={{ background: '#10b981', borderColor: 'transparent' }}
-              >
-                Test Scenarios
-                {isTestMenuOpen ? <ChevronUp size={14} style={{ marginLeft: 4 }} /> : <ChevronDown size={14} style={{ marginLeft: 4 }} />}
-              </button>
-              {isTestMenuOpen && (
-                <div className="test-menu-dropdown">
-                  {DEEP_TEST_QUESTIONS.map((item, i) => (
-                    <button
-                      key={i}
-                      className="test-menu-item"
-                      onClick={() => runScenario(item.question)}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-              )}
+      {/* Navigation Rail */}
+
+
+      {/* Main Workspace */}
+      <div className="main-workspace">
+        <header className="workspace-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ padding: 8, background: 'rgba(37, 99, 235, 0.1)', borderRadius: 8 }}>
+              <Bot className="bot-icon" style={{ color: 'var(--primary-color)' }} size={24} />
             </div>
+            <span style={{ fontWeight: 600, fontSize: '1.2rem', color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>Gaming Analytics</span>
+
+            {/* Dashboard Selection Dropdown */}
+            <div style={{ position: 'relative', marginLeft: '1rem' }}>
+              <select
+                value={activeDashboard}
+                onChange={(e) => setActiveDashboard(e.target.value)}
+                style={{
+                  appearance: 'none',
+                  padding: '8px 32px 8px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-primary)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.9rem',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  outline: 'none',
+                  minWidth: '200px'
+                }}
+              >
+                {DASHBOARDS.map((dash) => (
+                  <option key={dash.id} value={dash.id}>
+                    {dash.title}
+                  </option>
+                ))}
+              </select>
+              <div style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-secondary)' }}>
+                <ChevronDown size={14} />
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
             <button
-              className="reauth-btn"
               onClick={logout}
               title="Logout"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                background: 'transparent',
+                border: '1px solid var(--border-color)',
+                padding: '8px 16px',
+                borderRadius: '8px',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+                fontSize: '0.9rem'
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-tertiary)'; e.currentTarget.style.color = 'var(--text-primary)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
             >
-              Logout
-            </button>
-            <button
-              className={`payload - toggle ${showPayload ? 'active' : ''} `}
-              onClick={() => setShowPayload(!showPayload)}
-              title="Toggle Payload View"
-            >
-              <Code size={20} />
+              <LogOut size={16} />
+              <span>Log Out</span>
             </button>
           </div>
-        </div>
-      </header>
+        </header>
 
-      <div className="main-content">
-        <main className="chat-container">
-          <div className="messages-list">
-            {messages.map((msg, index) => (
-              <div key={index} className={`message ${msg.role} `}>
-                <div className="message-content">
-                  <div className="message-header">
-                    <div className="message-role">
-                      {msg.role === 'agent' ? <Bot size={16} /> : <User size={16} />}
-                      <span>{msg.role === 'agent' ? 'Analyst' : 'You'}</span>
-                    </div>
-                    {msg.role === 'agent' && msg.timings && <TimingPopup timings={msg.timings} />}
+        <section className="workspace-content" style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column' }}>
+          {/* Overlay to catch mouse events during resize */}
+          {isResizing && <div className="resize-overlay" style={{
+            position: 'absolute', inset: 0, zIndex: 9999, background: 'transparent'
+          }} />}
+          <div style={{ flex: 1, position: 'relative' }}>
+            {activeDashboard === 'chat' ? (
+              /* Chat is now sidebar only, this view might be deprecated or used for full-screen chat. 
+                 But based on layout, we are toggling DASHBOARDS here. */
+              <div style={{ padding: '2rem', color: '#fff' }}>Select a dashboard from the left.</div>
+            ) : (
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, overflow: 'hidden' }}>
+                {embedError ? (
+                  <div style={{
+                    position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+                    background: 'rgba(255,0,0,0.1)', padding: '20px', borderRadius: '8px', border: '1px solid #ff4444', color: '#ff4444'
+                  }}>
+                    <h3>Embedding Error</h3>
+                    <p>{embedError}</p>
+                    <p style={{ fontSize: '0.8em', opacity: 0.8 }}>Check backend logs for API connection details.</p>
                   </div>
-
-                  {/* Render Thoughts */}
-                  {msg.thoughts && msg.thoughts.length > 0 && (
-                    <ThinkingProcessAccordion
-                      thoughts={msg.thoughts}
-                      isComplete={index !== messages.length - 1 || !isLoading}
-                    />
-                  )}
-
-                  <div className="message-text">
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      components={markdownComponents}
-                    >
-                      {msg.content}
-                    </ReactMarkdown>
+                ) : signedUrl ? (
+                  <iframe
+                    src={signedUrl}
+                    style={{ width: '100%', height: '100%', border: 'none' }}
+                    title="Looker Dashboard"
+                  />
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#666' }}>
+                    <Loader2 className="spin" size={32} />
+                    <span style={{ marginLeft: 10 }}>Loading Dashboard...</span>
                   </div>
-
-                  {/* Render Explore Link */}
-                  {msg.link && (
-                    <div className="message-actions">
-                      <a
-                        href={msg.link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="action-link"
-                      >
-                        <ExternalLink size={14} />
-                        Open in Looker
-                      </a>
-                    </div>
-                  )}
-
-                  {/* Render Suggestions */}
-                  {msg.suggestions && msg.suggestions.length > 0 && (
-                    <div className="suggestions-container">
-                      <div className="suggestions-label">Related Questions:</div>
-                      <div className="suggestions-list">
-                        {msg.suggestions.map((suggestion, i) => (
-                          <button
-                            key={i}
-                            className="suggestion-chip"
-                            onClick={() => handleSubmit(null, suggestion)}
-                          >
-                            {suggestion}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-
-            {messages.length === 1 && !isLoading && (
-              <div className="starter-questions-container">
-                <div className="starter-header">
-                  <h3>Try asking...</h3>
-                </div>
-                <div className="starter-grid">
-                  {STARTER_QUESTIONS.map((q, i) => (
-                    <button
-                      key={i}
-                      onClick={() => handleSubmit(null, q)}
-                      className="starter-card"
-                    >
-                      {q}
-                    </button>
-                  ))}
-                </div>
+                )}
               </div>
             )}
-            {isLoading && (
-              <div className="message agent">
-                <div className="message-content">
-                  <div className="message-header">
-                    <Bot size={16} />
-                    <span>Analyst</span>
-                  </div>
-                  <div className="message-text loading">
-                    <Loader2 className="animate-spin" size={20} />
-                    <span>
-                      {isLongQuery ? "Performing deep analysis..." : "Analyzing data..."}
-                    </span>
-                  </div>
-                  {isLongQuery && (
-                    <div className="long-query-notice">
-                      <AlertTriangle size={16} />
-                      <span>This is a complex query. I'm digging through multiple data sources. This may take up to 30 seconds.</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
           </div>
-        </main>
-
-        {showPayload && (
-          <aside className="payload-panel">
-            <div className="payload-header">
-              <h2>Debug Payloads</h2>
-              <button onClick={() => setShowPayload(false)} className="close-btn">
-                <X size={18} />
-              </button>
-            </div>
-            <div className="payload-content">
-              <div className="payload-section">
-                <h3>Last Request</h3>
-                <pre>{lastRequest ? JSON.stringify(lastRequest, null, 2) : 'No request yet'}</pre>
-              </div>
-              <div className="payload-section">
-                <h3>Last Response</h3>
-                <pre>{lastResponse ? JSON.stringify(lastResponse, null, 2) : 'No response yet'}</pre>
-              </div>
-            </div>
-          </aside>
-        )}
+          {!isSidebarOpen && (
+            <button className="sidebar-toggle glass" onClick={() => setIsSidebarOpen(true)} title="Open Assistant">
+              <MessageSquare size={20} />
+            </button>
+          )}
+        </section>
       </div>
 
-      <footer className="input-area">
-        <form onSubmit={handleSubmit} className="input-form">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask a question about your gaming data..."
-            disabled={isLoading}
-          />
-          <button type="submit" disabled={isLoading || !input.trim()}>
-            <Send size={20} />
-          </button>
-        </form>
-      </footer>
+      {/* Resizer Handle */}
+      {isSidebarOpen && (
+        <div
+          className={`sidebar-resizer ${isResizing ? 'resizing' : ''}`}
+          onMouseDown={startResizing}
+        />
+      )}
 
+      {/* Assistant Sidebar */}
+      <aside
+        ref={sidebarRef}
+        className={`assistant-sidebar ${isSidebarOpen ? '' : 'collapsed'}`}
+        style={{ width: isSidebarOpen ? sidebarWidth : 0 }}
+      >
+        <header className="sidebar-header">
+          <div className="sidebar-title">
+            <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, textTransform: 'none' }}>
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2A10 10 0 0 0 2 12" stroke="#EA4335" strokeWidth="4" />
+                <path d="M12 2A10 10 0 0 1 22 12" stroke="#4285F4" strokeWidth="4" />
+                <path d="M22 12A10 10 0 0 1 12 22" stroke="#34A853" strokeWidth="4" />
+                <path d="M12 22A10 10 0 0 1 2 12" stroke="#FBBC04" strokeWidth="4" />
+              </svg>
+              <span>Agent</span>
+            </h3>
+          </div>
+          <div className="sidebar-actions" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            {/* Mode Toggle */}
+            <div className="mode-toggle-container">
+              <button
+                className={`mode-toggle-btn ${!isDeepMode ? 'active' : ''}`}
+                onClick={() => setIsDeepMode(false)}
+                title="Fast Mode"
+              >
+                <Zap size={14} />
+                <span>Fast</span>
+              </button>
+              <button
+                className={`mode-toggle-btn ${isDeepMode ? 'active' : ''}`}
+                onClick={() => setIsDeepMode(true)}
+                title="Deep Analysis Mode"
+              >
+                <Brain size={14} />
+                <span>Deep</span>
+              </button>
+            </div>
+            {/* Test Controls - Scenarios Dropdown */}
+            <div style={{ marginRight: 'auto', display: 'flex', gap: '0.5rem', position: 'relative' }}>
+              <div style={{ position: 'relative' }}>
+                <button
+                  className="test-menu-trigger"
+                  onClick={() => setIsTestMenuOpen(!isTestMenuOpen)}
+                  title="Scenarios"
+                  style={{ width: 'auto', padding: '0 12px', fontSize: '0.8rem', height: 32 }}
+                >
+                  Scenarios <ChevronDown size={14} style={{ marginLeft: 4, opacity: 0.7 }} />
+                </button>
+                {isTestMenuOpen && (
+                  <div className="test-menu-dropdown glass" style={{ right: 0, width: 200, top: '100%' }}>
+                    <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-color)', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                      TEST SCENARIOS
+                    </div>
+                    {DEEP_TEST_QUESTIONS.map((item, i) => (
+                      <button
+                        key={i}
+                        className="test-menu-item"
+                        onClick={() => runScenario(item.question)}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <button
+              className={`nav-item ${isAutoTesting ? 'active' : ''}`}
+              onClick={() => setIsAutoTesting(!isAutoTesting)}
+              title={isAutoTesting ? "Stop Auto Test" : "Start Auto Test"}
+              style={{ width: 'auto', padding: '0 12px', height: 32 }}
+            >
+              <LayoutDashboard size={16} /> {/* Placeholder icon for test */}
+              <span style={{ fontSize: '0.8rem' }}>{isAutoTesting ? "Stop" : "Auto Test"}</span>
+            </button>
+
+            <button className="nav-item" onClick={() => setIsSidebarOpen(false)} style={{ width: 32, height: 32 }}>
+              <X size={16} />
+            </button>
+          </div>
+        </header>
+
+        <div className="chat-messages">
+          {messages.map((msg, index) => (
+            <div key={index} className={`message ${msg.role}`}>
+              <div className="message-header" style={{ justifyContent: msg.role === 'agent' ? 'flex-start' : 'flex-end' }}>
+                {msg.role === 'agent' && (
+                  <span className="message-role" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Bot size={14} /> Analyst
+                  </span>
+                )}
+                {/* User label hidden for cleaner look */}
+
+                {msg.role === 'agent' && msg.timings && <TimingPopup timings={msg.timings} />}
+              </div>
+
+              <div className="message-bubble">
+                {msg.thoughts && msg.thoughts.length > 0 && (
+                  <ThinkingProcessAccordion
+                    thoughts={msg.thoughts}
+                    isComplete={index !== messages.length - 1 || !isLoading}
+                  />
+                )}
+                <div className="message-text">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={markdownComponents}
+                  >
+                    {msg.content}
+                  </ReactMarkdown>
+                </div>
+
+                {msg.link && (
+                  <div className="message-actions">
+                    <LookerLink url={msg.link} />
+                  </div>
+                )}
+
+                {msg.role === 'agent' && !msg.isStreaming && msg.thoughts && msg.thoughts.some(t => t.includes("Found similar question in cache")) && (
+                  <div className="message-actions" style={{ marginTop: '8px' }}>
+                    <button
+                      className="action-link"
+                      onClick={() => {
+                        // Find the user prompt for this message. It's normally the one right before.
+                        // We are mapping 'messages', so we have 'i'.
+                        const prompt = messages[i - 1]?.content;
+                        if (prompt) {
+                          handleSubmit(null, prompt, { forceRefresh: true });
+                        }
+                      }}
+                      disabled={isLoading}
+                      style={{ cursor: isLoading ? 'not-allowed' : 'pointer', background: 'none', border: 'none', display: 'flex', alignItems: 'center', gap: '4px', color: '#64748b', fontSize: '0.8rem', padding: 0 }}
+                    >
+                      <RefreshCw size={14} className={isLoading ? "animate-spin" : ""} />
+                      Refresh Data (Bypass Cache)
+                    </button>
+                  </div>
+                )}
+
+                {msg.suggestions && msg.suggestions.length > 0 && (
+                  <div className="suggestions-container">
+                    <div className="suggestions-list">
+                      {msg.suggestions.map((suggestion, i) => (
+                        <button key={i} className="suggestion-chip" onClick={() => handleSubmit(null, suggestion)}>
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {messages.length === 1 && !isLoading && (
+            <div className="starter-questions-container">
+              <div className="starter-header">
+                <span className="sparkle-icon">✨</span>
+                <span className="starter-label">Suggested Queries</span>
+              </div>
+              <div className="starter-list">
+                {STARTER_QUESTIONS.map((q, i) => (
+                  <button key={i} onClick={() => handleSubmit(null, q)} className="starter-chip">
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {isLoading && (
+            <div className="message agent">
+              <div className="message-bubble">
+                <div className="message-text loading" style={{ color: 'var(--primary-color)' }}>
+                  <Loader2 className="animate-spin" size={16} />
+                  <span>{currentThought || (isLongQuery ? "Thinking..." : "Processing...")}</span>
+                </div>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        <footer className="assistant-input-area">
+          <form onSubmit={handleSubmit} className="input-wrapper">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Query gaming data..."
+              disabled={isLoading}
+            />
+            <button type="submit" className="send-btn" disabled={isLoading || !input.trim()}>
+              <Send size={20} />
+            </button>
+          </form>
+        </footer>
+
+      </aside>
     </div>
   )
 }

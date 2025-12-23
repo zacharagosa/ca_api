@@ -1,5 +1,8 @@
 from flask import Flask, request, jsonify, Response, stream_with_context
 import json
+import time
+import os
+
 from flask_cors import CORS
 from agent import app as agent_app, PROJECT_ID, LOCATION
 import threading
@@ -7,7 +10,13 @@ import queue
 import agent
 import requests
 import urllib.parse
+from google.auth.transport.requests import Request as gRequest
+import hmac
+import base64
+import binascii
+from struct import pack
 agent.thought_queue = queue.Queue()
+from cache_manager import cache_manager
 
 # Vertex AI is initialized in agent.py to ensure it is configured before agent creation.
 
@@ -38,6 +47,7 @@ def chat():
     deep_analysis = data.get('deep_analysis', False)
     user_id = data.get('user_id', 'web_user')
     session_id = data.get('session_id', 'default_session') # Use session_id if provided, else default
+    force_refresh = data.get('force_refresh', False)
     
     if not user_input:
         return jsonify({'error': 'No message provided'}), 400
@@ -76,13 +86,61 @@ def chat():
             if access_token:
                 agent.set_access_token(access_token)
 
-
             try:
-                # Always use the unified agent stream
-                stream = agent_app.stream_query(message=user_input, user_id=user_id, session_id=session_id)
+                # Prepend explicit instruction based on user mode
+                final_input = user_input
+                instruction_prefix = ""
+                if deep_analysis:
+                     instruction_prefix = "Instruction: PERFORM_DEEP_ANALYSIS. Question: "
+                     final_input = f"{instruction_prefix}{user_input}"
+                else:
+                     instruction_prefix = "Instruction: FAST_RESPONSE. Question: "
+                     final_input = f"{instruction_prefix}{user_input}"
+
+                # 1. Check Cache (only if not forced)
+                cached_response = None
+                if not force_refresh:
+                    cached_response = cache_manager.get_cached_response(final_input)
+                
+                if cached_response:
+                    agent.thought_queue.put("Found similar question in cache. Loading result...")
+                    # Simulate streaming for the frontend
+                    # We can split by lines or just send it all
+                    response_queue.put(("chunk", {"text": cached_response}))
+                    response_queue.put(("done", None))
+                    return
+
+                # 2. Run Agent
+                # Always use the unified agent stream with the modified input
+                stream = agent_app.stream_query(message=final_input, user_id=user_id, session_id=session_id)
+                
+                full_response_accumulator = []
                 
                 for chunk in stream:
+                    # Accumulate text for caching
+                    if hasattr(chunk, 'text') and chunk.text:
+                         full_response_accumulator.append(chunk.text)
+                    elif isinstance(chunk, dict):
+                        if "content" in chunk and "parts" in chunk["content"]:
+                             for part in chunk["content"]["parts"]:
+                                 if "text" in part:
+                                     full_response_accumulator.append(part["text"])
+                        elif "text" in chunk:
+                             full_response_accumulator.append(chunk["text"])
+                    elif isinstance(chunk, str):
+                        full_response_accumulator.append(chunk)
+
                     response_queue.put(("chunk", chunk))
+                
+                # 3. Add to Cache
+                full_text = "".join(full_response_accumulator)
+                if full_text.strip():
+                    # Run in background or just do it here (it takes a small embedding call time)
+                    try:
+                        cache_manager.add_to_cache(final_input, full_text)
+                    except Exception as e:
+                        print(f"Failed to cache response: {e}")
+
                 response_queue.put(("done", None))
             except Exception as e:
                 response_queue.put(("error", e))
@@ -224,6 +282,60 @@ def reauth():
         return jsonify({'status': 'Authentication process started. Please check your browser.'})
     except Exception as e:
         print(f"Reauth Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+
+from looker_embed import LookerEmbedManager
+
+# Initialize the embed manager globally to reuse the SDK session
+embed_manager = None
+try:
+    embed_manager = LookerEmbedManager()
+except Exception as e:
+    print(f"WARNING: Could not initialize Looker Embed Manager: {e}")
+
+@app.route('/api/embed', methods=['POST'])
+def get_embed_url():
+    """Generates a signed Looker embed URL using the Looker SDK."""
+    if not embed_manager:
+        return jsonify({'error': 'Embed Manager not initialized'}), 500
+        
+    try:
+        data = request.json
+        # Target URL from frontend is likely relative "/embed/...", but SDK might want full or specific format
+        # SDK `create_sso_embed_url` often expects the full URL including protocol/host if strictly validation
+        # OR just the path. Let's try passing what we receive. 
+        # Actually, standard is usually the full URL *except* the /login/embed/ part? 
+        # Wait, `target_url` for `create_sso_embed_url` should be the destination URL.
+        # e.g. https://<instance>/embed/dashboards/1
+        
+        target_path = data.get('target_url')
+        if not target_path:
+            return jsonify({'error': 'Target URL is required'}), 400
+
+        # Ensure we construct the full target URL if we only got a path
+        if not target_path.startswith('http'):
+             # Looker Instance URI usually has no trailing slash, target_path starts with /
+             # But let's be careful.
+             base = agent.LOOKER_INSTANCE_URI.rstrip('/')
+             if not target_path.startswith('/'):
+                 target_path = '/' + target_path
+             full_target_url = f"{base}{target_path}"
+        else:
+            full_target_url = target_path
+
+        user_id = data.get('user_id', 'external_user_123')
+        
+        signed_url = embed_manager.generate_signed_url(
+            target_url=full_target_url,
+            user_id=user_id
+        )
+        
+        return jsonify({'url': signed_url})
+
+    except Exception as e:
+        print(f"Embed Gen Error: {e}")
         return jsonify({'error': str(e)}), 500
 
 
