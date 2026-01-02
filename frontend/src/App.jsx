@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { useGoogleLogin } from '@react-oauth/google'
-import { Send, Bot, User, Loader2, Code, X, ExternalLink, ChevronDown, ChevronUp, Info, AlertTriangle, LayoutDashboard, MessageSquare, Menu, ChevronRight, Maximize2, Minimize2, LogOut, Zap, Brain, RefreshCw } from 'lucide-react'
+import { Send, Bot, User, Loader2, Code, X, ExternalLink, ChevronDown, ChevronUp, Info, AlertTriangle, LayoutDashboard, MessageSquare, Menu, ChevronRight, Maximize2, Minimize2, LogOut, Zap, Brain, RefreshCw, Square } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import JSON5 from 'json5'
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, ArcElement, Filler } from 'chart.js';
 import { Bar, Line, Pie, Scatter } from 'react-chartjs-2';
 
@@ -24,6 +25,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 import { TEST_QUESTIONS } from './test_questions';
 import { DASHBOARDS } from './config/dashboards';
+import { STARTER_QUESTIONS, DEEP_TEST_QUESTIONS } from './config/questions';
 
 
 const ChartRenderer = ({ config }) => {
@@ -187,15 +189,23 @@ const MetadataAccordion = ({ metadata }) => {
             </div>
           )}
 
-          {metadata.filters && Object.keys(metadata.filters).length > 0 && (
+          {metadata.filters && (
             <div className="metadata-section">
               <h4>Filters</h4>
               <ul>
-                {Object.entries(metadata.filters).map(([key, value]) => (
-                  <li key={key}>
-                    <span className="metadata-key">{key}:</span> {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                  </li>
-                ))}
+                {Array.isArray(metadata.filters) ? (
+                  metadata.filters.map((f, i) => (
+                    <li key={i}>
+                      <span className="metadata-key">{f.field || f.name}:</span> {String(f.value || f.expression)}
+                    </li>
+                  ))
+                ) : (
+                  Object.entries(metadata.filters).map(([key, value]) => (
+                    <li key={key}>
+                      <span className="metadata-key">{key}:</span> {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                    </li>
+                  ))
+                )}
               </ul>
             </div>
           )}
@@ -373,20 +383,7 @@ function App() {
   const [isRunningTests, setIsRunningTests] = useState(false);
   const [currentThought, setCurrentThought] = useState(null); // Track live status
 
-  const STARTER_QUESTIONS = [
-    "Analyze the revenue trend for the last 6 months vs user acquisition.",
-    "Show me total revenue by week broken down by platform.",
-  ];
-  const DEEP_TEST_QUESTIONS = [
-    { label: "UA Performance", question: "Analyze the ROAS (Return on Ad Spend) by Campaign for the last 30 days. Which campaigns are performing best and should be scaled?" },
-    { label: "Player Behavior", question: "Compare the average session length and retention rates (D1, D7) of paying users vs non-paying users for the game 'Looker Battle Royale' over the last 3 months." },
-    { label: "Market Trends", question: "What are the top 3 countries by revenue for the last quarter? For these countries, how does the ARPU compare?" },
-    { label: "Whale Demographics", question: "Identify the top 10% of users by total revenue. What is the breakdown of these users by Country and Platform? This helps us target high-value segments." },
-    { label: "Campaign Efficiency", question: "Compare the ROAS and D7 Retention Rate for the top 5 campaigns by spend. Which campaign offers the best balance of short-term return and long-term engagement?" },
-    { label: "Progression Impact", question: "Compare the Average Revenue Per User (ARPU) for users who have triggered the 'level_up' event at least 5 times vs those who haven't. Does deep progression correlate with higher spend?" },
-    { label: "Geo Opportunities", question: "List the top 5 countries by number of users. For these countries, calculate the Conversion Rate (Paying Users / Total Users). Which country has high volume but low monetization?" },
-    { label: "Platform Deep Dive", question: "Compare the Average Session Length and Total Revenue for 'iOS' vs 'Android' users. If one platform underperforms, break it down by Country to see if it's a regional issue." }
-  ];
+  // Questions moved to config/questions.js
 
   const [isTestMenuOpen, setIsTestMenuOpen] = useState(false);
 
@@ -399,7 +396,7 @@ function App() {
     await handleSubmit(null, question);
   };
 
-  const [activeDashboard, setActiveDashboard] = useState('overview'); // Changed to use ID
+  const [activeDashboard, setActiveDashboard] = useState(DASHBOARDS[0]?.id || 'overview'); // Changed to use ID
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   const [sidebarWidth, setSidebarWidth] = useState(600);
@@ -530,15 +527,36 @@ function App() {
     scope: 'https://www.googleapis.com/auth/cloud-platform'
   });
 
+  // Ref for AbortController
+  const abortControllerRef = useRef(null);
+
+  const handleStop = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsLoading(false);
+  };
+
   // Refactored handleSubmit to accept an optional message argument and return a promise
   const handleSubmit = async (e, manualMessage = null, options = {}) => {
-    if (e) e.preventDefault()
+    if (e && e.preventDefault) e.preventDefault() // Check if e.preventDefault exists
+
+    // If loading, this button acts as Stop (handled in the render, but just in case)
+    if (isLoading) {
+      handleStop();
+      return;
+    }
+
     const userMessage = manualMessage || input
     if (!userMessage.trim()) return false
 
     setMessages(prev => [...prev, { role: 'user', content: userMessage, timestamp: new Date() }])
     if (!manualMessage) setInput('')
     setIsLoading(true)
+
+    // Create new AbortController
+    abortControllerRef.current = new AbortController();
 
     const requestPayload = {
       message: userMessage,
@@ -557,8 +575,10 @@ function App() {
           ...(accessToken ? { 'Authorization': `Bearer ${accessToken}` } : {})
         },
         body: JSON.stringify(requestPayload),
+        signal: abortControllerRef.current.signal // Attach signal
       })
 
+      // If aborted, fetch throws AbortError
       if (!response.ok) {
         if (response.status === 401 || response.status === 403) {
           logout();
@@ -567,12 +587,9 @@ function App() {
         const data = await response.json()
         throw new Error(data.error || 'Failed to fetch')
       }
-      // Initialize empty agent message
-      // Initialize empty agent message
-      // Initialize empty agent message
+
       const startTime = Date.now();
       setMessages(prev => [...prev, { role: 'agent', content: '', thoughts: [], timings: { startTime, steps: [] } }])
-      // setIsLoading(false) // Moved to end of stream
 
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
@@ -654,7 +671,12 @@ function App() {
               return newMessages
             })
           } else if (line.startsWith('LINK: ')) {
-            const link = line.substring(6)
+            let link = line.substring(6).trim()
+            // Check if link is in markdown format [url](url) or [text](url)
+            const markdownMatch = link.match(/\[.*?\]\((.*?)\)/);
+            if (markdownMatch) {
+              link = markdownMatch[1];
+            }
             setMessages(prev => {
               const newMessages = [...prev]
               const lastMsg = newMessages[newMessages.length - 1]
@@ -720,10 +742,15 @@ function App() {
       return true; // Signal completion
 
     } catch (error) {
-      console.error('Error:', error)
-      setMessages(prev => [...prev, { role: 'agent', content: 'Sorry, I encountered an error processing your request.' }])
-      // setLastResponse({ error: error.message })
+      if (error.name === 'AbortError') {
+        console.log('Fetch aborted by user');
+        setMessages(prev => [...prev, { role: 'agent', content: 'Analysis stopped by user.' }]);
+      } else {
+        console.error('Error:', error)
+        setMessages(prev => [...prev, { role: 'agent', content: 'Sorry, I encountered an error processing your request.' }])
+      }
       setIsLoading(false)
+      abortControllerRef.current = null;
       return false;
     }
   }
@@ -780,24 +807,11 @@ function App() {
       const match = /language-(\w+)/.exec(className || '')
       const lang = match ? match[1] : '';
 
-      // Helper to clean JSON string (remove comments, trailing commas)
-      const cleanJson = (str) => {
-        try {
-          return str.replace(/\/\/.*$/gm, '') // Remove single line comments
-            .replace(/\/\*[\s\S]*?\*\//g, '') // Remove multi line comments
-            .replace(/,(\s*[}\]])/g, '$1') // Remove trailing commas
-            .trim();
-        } catch (e) {
-          return str;
-        }
-      };
-
       // Handle Chart
       const isChart = !inline && (lang === 'json-chart' || (lang === 'json' && String(children).includes('"type":')));
       if (isChart) {
         try {
-          const jsonStr = cleanJson(String(children));
-          const config = JSON.parse(jsonStr);
+          const config = JSON5.parse(String(children));
           if (config.type && config.data && config.series) {
             return <ChartRenderer config={config} />
           }
@@ -807,18 +821,22 @@ function App() {
         }
       }
 
-      // Handle Metadata
-      const isMetadata = !inline && (lang === 'json-metadata' || (lang === 'json' && String(children).includes('"fields":')));
+      // Handle Metadata - REMOVED per user request
+      /*
+      const isMetadata = !inline && (
+        lang === 'json-metadata' ||
+        (lang === 'json' && (
+          String(children).includes('"fields":') ||
+          String(children).includes('"filters":') ||
+          String(children).includes('"sql":') ||
+          String(children).includes('"metric":') ||
+          String(children).includes('"query_details":')
+        ))
+      );
       if (isMetadata) {
-        try {
-          const jsonStr = cleanJson(String(children));
-          const metadata = JSON.parse(jsonStr);
-          return <MetadataAccordion metadata={metadata} />
-        } catch (e) {
-          console.error("Metadata JSON Parse Error:", e);
-          // Fallthrough
-        }
+         return null; // Don't render anything
       }
+      */
 
       // Handle SQL
       if (!inline && lang === 'sql') {
@@ -1179,8 +1197,13 @@ function App() {
               placeholder="Query gaming data..."
               disabled={isLoading}
             />
-            <button type="submit" className="send-btn" disabled={isLoading || !input.trim()}>
-              <Send size={20} />
+            <button
+              type={isLoading ? "button" : "submit"}
+              className={`send-btn ${isLoading ? 'stop-btn' : ''}`}
+              disabled={!input.trim() && !isLoading}
+              onClick={isLoading ? handleStop : undefined}
+            >
+              {isLoading ? <Square size={20} fill="currentColor" /> : <Send size={20} />}
             </button>
           </form>
         </footer>

@@ -1,7 +1,16 @@
 import os
 import json
 import time
+import yaml
 from dotenv import load_dotenv
+
+# Load agent configuration
+try:
+    with open('agent_config.yaml', 'r') as f:
+        AGENT_CONFIG = yaml.safe_load(f)
+except Exception as e:
+    print(f"WARNING: Failed to load agent_config.yaml: {e}")
+    AGENT_CONFIG = {}
 
 load_dotenv()
 import threading
@@ -53,7 +62,7 @@ EXPLORE = os.getenv("EXPLORE", "events")
 PROJECT_ID = os.getenv("PROJECT_ID", "1094200614711")
 if PROJECT_ID == "aragosalooker":
     PROJECT_ID = "1094200614711" # Force numeric ID if default/old string is found
-LOCATION = os.getenv("LOCATION", "global")
+LOCATION = os.getenv("LOCATION", "us-central1")
 vertexai.init(
     project=PROJECT_ID,
     location=LOCATION,
@@ -89,7 +98,12 @@ def get_access_token():
 
 
 
+
+# Global client to avoid re-init overhead
+global_data_chat_client = None
+
 def get_insights(question: str):
+
     """Queries the Conversational Analytics API using a question as input.
 
     Use this tool to generate the data for data insights.
@@ -103,10 +117,13 @@ def get_insights(question: str):
         the output easier for an LLM to understand and process.
     """
  
-    # INJECT CREDENTIALS HERE
-    data_chat_client = geminidataanalytics.DataChatServiceClient(
-        credentials=auth_manager.get_credentials()
-    )
+    global global_data_chat_client
+    if global_data_chat_client is None:
+        log_debug("Initializing Global DataChatServiceClient...")
+        global_data_chat_client = geminidataanalytics.DataChatServiceClient(
+            credentials=auth_manager.get_credentials()
+        )
+    data_chat_client = global_data_chat_client
 
     # Always use service account Looker credentials as we are using Google Sign-In for app auth
     log_debug("Using service account Looker credentials.")
@@ -130,10 +147,7 @@ def get_insights(question: str):
         ),
     )
 
-    system_instruction = """You are a specialized AI data analyst for a mobile gaming company. Your primary function is to answer natural language questions from a user by constructing and executing precise queries against a Looker instance.
-    
-    When you generate a response with data, you MUST include a JSON block with type `json-metadata` containing the query details (filters, sorts, fields) AND the generated SQL query in a field named `sql`.
-    """
+    system_instruction = AGENT_CONFIG.get('get_insights', {}).get('system_instruction', """You are a specialized AI data analyst...""")
 
     # Context set-up for 'Chat using Inline Context'
     inline_context = geminidataanalytics.Context(
@@ -356,60 +370,15 @@ def run_deep_analysis(question: str):
 
     # Initialize the model
     model = GenerativeModel(
-        "gemini-3-flash-preview",
+        "gemini-3-pro-preview",
         tools=[analysis_tools],
         tool_config=ToolConfig(
             function_calling_config=ToolConfig.FunctionCallingConfig(
                 mode=ToolConfig.FunctionCallingConfig.Mode.AUTO,
             )
         ),
-        system_instruction="""You are a Senior Data Analyst. The user has a complex request.
-        Your goal is to provide a comprehensive analysis by breaking down the problem, asking multiple questions to Looker AND the Knowledge Base, and synthesizing the results.
-
-        **Available Tools:**
-        - `get_insights(question)`: Queries the SQL database (Looker). Use for quantitative data (metrics, trends).
-        
-        Process:
-        1. Understand the user's high-level goal.
-        2. Formulate a plan.
-        3. Execute tool calls. **CRITICAL: Execute multiple tools in parallel** to save time.
-        4. Analyze the returned data.
-        5. Synthesize a final report.
-        
-        **PERFORMANCE TIP:**
-        - It is much faster to run ONE complex query than multiple simple ones.
-        - If you suspect you might need a breakdown (e.g., by Country), include it in the initial query (e.g., "Group by Platform AND Country"). You can always aggregate the data yourself to answer the high-level question.
-        - You can output multiple `get_insights` calls in a single turn to run them in parallel.
-
-        **CRITICAL OUTPUT REQUIREMENTS:**
-
-        1. **Evidence & Links:**
-           - For every key finding, you MUST cite the source data.
-           - The `get_insights` tool returns an `explore_url` in the `data_insights`. You MUST include this as a link: `[View Source Query](explore_url)`.
-           
-        2. **Visualizations:**
-           - You MUST generate charts to visualize trends or comparisons.
-           - To create a chart, output a JSON code block (```json) containing the chart configuration.
-           - The JSON structure MUST be:
-             {
-               "type": "bar" | "line" | "pie",
-               "title": "Chart Title",
-               "xAxisKey": "category_column",
-               "stacked": true/false,
-               "data": [{"category_column": "Value", "series1": 10, "series2": 20}, ...],
-               "series": [{"dataKey": "series1", "name": "Series 1", "fill": "#8884d8", "yAxisID": "left" | "right"}, ...]
-             }
-           - Ensure data is pivoted correctly for the chart (one row per X-axis value).
-           - **Dual Axis**: If comparing two measures with different scales (e.g., Revenue vs Session Length), assign one series `"yAxisID": "right"`.
-           
-        3. **Report Structure:**
-           - **Executive Summary**: High-level answer.
-           - **Detailed Analysis**:
-             - **Finding 1**: Description.
-               - *Chart*: (Insert JSON block here)
-               - *Source*: [View Source Query](url)
-             - **Finding 2**: ...
-        """
+        system_instruction=AGENT_CONFIG.get('deep_analysis', {}).get('system_instruction', """You are a Senior Data Analyst. The user has a complex request.
+        Your goal is to provide a comprehensive analysis by breaking down the problem, asking multiple questions to Looker AND the Knowledge Base, and synthesizing the results.""")
     )
     
     chat = model.start_chat()
@@ -513,14 +482,21 @@ def perform_deep_analysis(question: str):
         A comprehensive markdown report with charts and data.
     """
     full_report = ""
-    # We need to consume the generator here since tools must return a value, not a generator
-    for chunk in run_deep_analysis(question):
-        content = chunk.get('content', {})
-        parts = content.get('parts', [])
-        for part in parts:
-            text = part.get('text', '')
-            if text:
-                full_report += text
+    try:
+        # We need to consume the generator here since tools must return a value, not a generator
+        for chunk in run_deep_analysis(question):
+            content = chunk.get('content', {})
+            parts = content.get('parts', [])
+            for part in parts:
+                text = part.get('text', '')
+                if text:
+                    full_report += text
+    except Exception as e:
+        return f"Error during deep analysis execution: {str(e)}"
+
+    if not full_report:
+        return "Deep analysis completed but produced no final report. Please try refining your question."
+
     return full_report
 
 # Visualization Agent
@@ -587,36 +563,7 @@ visualization_agent = Agent(
 unified_agent = Agent(
     model="gemini-3-flash-preview",
     name="UnifiedAnalyticsAgent",
-    instruction="""You are an expert mobile gaming data analyst.
-    
-    Your goal is to answer user questions about their game data by choosing the best approach:
-    
-    **DECISION LOGIC:**
-    
-    **CRITICAL OVERRIDES:**
-    1.  **IF** input starts with "Instruction: FAST_RESPONSE", **YOU MUST USE PATH A** (`get_insights`). Ignore complexity logic.
-    2.  **IF** input starts with "Instruction: PERFORM_DEEP_ANALYSIS", **YOU MUST USE PATH B** (`perform_deep_analysis`). Ignore complexity logic.
-    
-    **STANDARD LOGIC (Only if no instruction provided):**
-    3.  **IF** the question is simple, direct, or asks for a specific metric (e.g., "What is the DAU?", "Show me revenue by country"), **USE `get_insights`**.
-    4.  **IF** the question is complex, requires comparison, root cause analysis, or multi-step reasoning (e.g., "Compare iOS vs Android", "Why is retention dropping?", "Analyze the impact of X"), **USE `perform_deep_analysis`**.
-    
-    **PATH A: Simple Queries (`get_insights`)**
-    1.  Call `get_insights`.
-    2.  Output the data as a Markdown table.
-    3.  If appropriate, call `VisualizationAgent` to generate a chart.
-    4.  Output the chart JSON in a `json-chart` block.
-    5.  Output the `explore_url` as `LINK: <url>`.
-    6.  Output metadata in `json-metadata`.
-    
-    **PATH B: Deep Analysis (`perform_deep_analysis`)**
-    1.  Call `perform_deep_analysis`.
-    2.  Return the output EXACTLY as provided by the tool. Do not summarize or modify it, as it already contains the full report, charts, and links.
-    
-    **General Rules:**
-    -   Always be helpful and professional.
-    -   Do not hallucinate data.
-    """,
+    instruction=AGENT_CONFIG.get('unified_agent', {}).get('instruction', """You are an expert mobile gaming data analyst..."""),
     tools=[
         get_insights,
         perform_deep_analysis,

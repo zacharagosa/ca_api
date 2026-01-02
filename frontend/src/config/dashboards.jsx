@@ -1,28 +1,61 @@
 import { LayoutDashboard, BarChart3, PieChart, Activity } from 'lucide-react';
 
-export const DASHBOARDS = [
+const ICON_MAP = {
+    'LayoutDashboard': LayoutDashboard,
+    'BarChart3': BarChart3,
+    'PieChart': PieChart,
+    'Activity': Activity
+};
+
+const DEFAULT_DASHBOARDS = [
     {
         id: 'overview',
-        title: 'Global Overview',
+        title: 'How Many times did a player do X?',
         url: '/embed/dashboards/4?Session+ID=&Collector+Tstamp+Date=7+day&Player+ID=&Event+Name=&Event+Details=',
-        icon: <LayoutDashboard size={20} />
+        icon: 'LayoutDashboard'
     },
     {
         id: 'battle-royale',
-        title: 'Battle Royale Analysis',
-        url: '/embed/dashboards/kacsHESOOkjUBInhOaSbUN?Date+Range=14+days&Game+Name=Lookup+Battle+Royale&Game+Version=1.4.4%2C1.4.6%2C1.5.0&Event+1=%22Match_Started%22&Event+2=%22Match_Ended%22&Event+3=%22Skin_Unlocked%22&Event+4=%22in_app_purchase%22&_theme=%7B%22background_color%22%3A%22%230a0e14%22%2C%22base_font_size%22%3A%2214px%22%2C%22color_collection_id%22%3A%22carbon_default%22%2C%22font_family%22%3A%22Inter%22%2C%22text_color%22%3A%22%23e2e8f0%22%7D',
-        icon: <BarChart3 size={20} />
+        title: 'Session Explorer',
+        url: '/embed/dashboards/5?Session+ID=C58FCAC8-422C-FD77-5AEE-BE989C4E7C00',
+        icon: 'BarChart3'
     },
     {
         id: 'performance',
-        title: 'Revenue & Performance',
-        url: '/embed/dashboards/dXqsKbYW2Bo3J4HO1yUUd3?_theme=%7B%22background_color%22%3A%22%230a0e14%22%2C%22base_font_size%22%3A%2214px%22%2C%22color_collection_id%22%3A%22carbon_default%22%2C%22font_family%22%3A%22Inter%22%2C%22text_color%22%3A%22%23e2e8f0%22%7D',
-        icon: <PieChart size={20} />
+        title: 'Player Explorer',
+        url: '/embed/dashboards/3?Session+ID=&Player+ID=A6025281-4A9B-AB5A-A7AD-0B8901FAAA1E&Session+Start+Date=7+day',
+        icon: 'PieChart'
     },
     {
         id: 'gemini-storyteller',
-        title: 'Gemini Storyteller',
-        url: '/embed/dashboards/GnE3B3qVRlxuTEod5n8Hhm?_theme=%7B%22background_color%22%3A%22%230a0e14%22%2C%22base_font_size%22%3A%2214px%22%2C%22color_collection_id%22%3A%22carbon_default%22%2C%22font_family%22%3A%22Inter%22%2C%22text_color%22%3A%22%23e2e8f0%22%7D',
-        icon: <Activity size={20} />
+        title: 'Weapon Stats Dashboard',
+        url: '/embed/dashboards/1?Collector+Tstamp+Date=2+days&Weapon+Equipped+Count=%3E5&Map+Name=',
+        icon: 'Activity'
     }
 ];
+
+const getDashboards = () => {
+    try {
+        const envConfig = import.meta.env.VITE_DASHBOARDS_CONFIG;
+        if (envConfig) {
+            const parsed = JSON.parse(envConfig);
+            return parsed.map(dashboard => ({
+                ...dashboard,
+                icon: ICON_MAP[dashboard.icon] ?
+                    (() => { const Icon = ICON_MAP[dashboard.icon]; return <Icon size={20} /> })() :
+                    <LayoutDashboard size={20} />
+            }));
+        }
+    } catch (e) {
+        console.warn('Failed to parse VITE_DASHBOARDS_CONFIG, using default dashboards', e);
+    }
+
+    return DEFAULT_DASHBOARDS.map(dashboard => ({
+        ...dashboard,
+        icon: ICON_MAP[dashboard.icon] ?
+            (() => { const Icon = ICON_MAP[dashboard.icon]; return <Icon size={20} /> })() :
+            <LayoutDashboard size={20} />
+    }));
+};
+
+export const DASHBOARDS = getDashboards();

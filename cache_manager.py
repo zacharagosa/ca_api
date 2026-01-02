@@ -12,18 +12,18 @@ class CacheManager:
 
     def _load_model(self):
         if self.model is None:
-            try:
-                # Lazy load
-                self.model = TextEmbeddingModel.from_pretrained(self.model_name)
-            except Exception as e:
-                print(f"Error loading embedding model {self.model_name}: {e}")
-                # Fallback
+            models_to_try = [self.model_name, "text-embedding-004", "text-embedding-gecko@003", "text-embedding-gecko@001"]
+            
+            for model_name in models_to_try:
                 try:
-                    fallback = "text-embedding-preview-0409"
-                    print(f"Retrying with fallback: {fallback}")
-                    self.model = TextEmbeddingModel.from_pretrained(fallback)
-                except Exception as e2:
-                     print(f"Fallback failed: {e2}")
+                    self.model = TextEmbeddingModel.from_pretrained(model_name)
+                    print(f"Successfully loaded embedding model: {model_name}")
+                    return
+                except Exception as e:
+                    print(f"Failed to load {model_name}: {e}")
+            
+            print("CRITICAL: Could not load any embedding model. Caching will be disabled.")
+            self.model = None
 
     def _load_cache(self):
         if os.path.exists(self.cache_file):
