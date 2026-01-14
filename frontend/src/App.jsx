@@ -1,11 +1,21 @@
 import { useState, useRef, useEffect } from 'react'
 import { useGoogleLogin } from '@react-oauth/google'
-import { Send, Bot, User, Loader2, Code, X, ExternalLink, ChevronDown, ChevronUp, Info, AlertTriangle, LayoutDashboard, MessageSquare, Menu, ChevronRight, Maximize2, Minimize2, LogOut, Zap, Brain, RefreshCw, Square } from 'lucide-react'
+import { Send, Bot, User, Loader2, Code, X, ExternalLink, ChevronDown, ChevronUp, Info, AlertTriangle, LayoutDashboard, MessageSquare, Menu, ChevronRight, Maximize2, Minimize2, LogOut, Zap, Brain, RefreshCw, Square, Sparkles, Trash2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import JSON5 from 'json5'
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, ArcElement, Filler } from 'chart.js';
 import { Bar, Line, Pie, Scatter } from 'react-chartjs-2';
+
+// UI Components
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+
+// Custom Components
+import DataTableRenderer from './DataTableRenderer';
+import { LookerLink } from '@/components/LookerLink';
 
 ChartJS.register(
   CategoryScale,
@@ -19,22 +29,67 @@ ChartJS.register(
   ArcElement,
   Filler
 );
-import './App.css'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
 
-import { TEST_QUESTIONS } from './test_questions';
-import { DASHBOARDS } from './config/dashboards';
-import { STARTER_QUESTIONS, DEEP_TEST_QUESTIONS } from './config/questions';
-
+// Default fallback values
+const DEFAULT_DASHBOARDS = [];
+const DEFAULT_STARTER_QUESTIONS = [];
+const DEFAULT_TEST_SCENARIOS = [];
 
 const ChartRenderer = ({ config }) => {
+  // Comprehensive validation - return null for any invalid config
   if (!config || !config.data) return null;
+
+  // Detect Chart.js format (from frontend heuristic) vs ChartRenderer format (from backend)
+  // Chart.js format has config.data.labels and config.data.datasets
+  // ChartRenderer format has config.data as array and config.series
+  const isChartJsFormat = config.data && Array.isArray(config.data.labels) && Array.isArray(config.data.datasets);
+
+  if (isChartJsFormat) {
+    // Additional validation for Chart.js format
+    if (!config.data.labels || !config.data.datasets || config.data.datasets.length === 0) {
+      return null;
+    }
+
+    // Render directly using Chart.js format with light theme
+    const chartType = config.type || 'bar';
+    const lightThemeOptions = {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'top',
+          labels: { color: '#374151', font: { size: 12 } }
+        },
+        title: config.options?.plugins?.title ? {
+          ...config.options.plugins.title,
+          color: '#111827',
+          font: { size: 14, weight: 'bold' }
+        } : undefined
+      },
+      scales: {
+        x: { ticks: { color: '#6B7280' }, grid: { color: '#E5E7EB' } },
+        y: { ticks: { color: '#6B7280' }, grid: { color: '#E5E7EB' } }
+      }
+    };
+    // Merge user options with light theme defaults
+    const options = { ...lightThemeOptions, ...(config.options || {}) };
+
+    if (chartType === 'bar') return <Bar options={options} data={config.data} />;
+    if (chartType === 'line' || chartType === 'area') return <Line options={options} data={config.data} />;
+    if (chartType === 'pie') return <Pie options={options} data={config.data} />;
+    return <Bar options={options} data={config.data} />;
+  }
+
+  // Original ChartRenderer format handling
+  if (!Array.isArray(config.data) || !Array.isArray(config.series) || config.series.length === 0) return null;
 
   const hasRightAxis = config.series.some(s => s.yAxisID === 'right');
 
   const options = {
     responsive: true,
+    maintainAspectRatio: false,
     interaction: {
       mode: 'index',
       intersect: false,
@@ -42,21 +97,31 @@ const ChartRenderer = ({ config }) => {
     plugins: {
       legend: {
         position: 'top',
+        labels: {
+          color: '#374151', // gray-700 for light theme
+          font: { size: 12 }
+        }
       },
       title: {
-        display: true,
+        display: !!config.title,
         text: config.title,
+        color: '#111827', // gray-900 for light theme
+        font: { size: 14, weight: 'bold' }
       },
     },
     scales: {
       x: {
-        stacked: config.stacked
+        stacked: config.stacked,
+        ticks: { color: '#6B7280' }, // gray-500
+        grid: { color: '#E5E7EB' }, // gray-200
       },
       y: {
         type: 'linear',
         display: true,
         position: 'left',
         stacked: config.stacked,
+        ticks: { color: '#6B7280' }, // gray-500
+        grid: { color: '#E5E7EB' }, // gray-200
       },
       ...(hasRightAxis && {
         y1: {
@@ -67,6 +132,7 @@ const ChartRenderer = ({ config }) => {
             drawOnChartArea: false,
           },
           stacked: config.stacked,
+          ticks: { color: '#6B7280' },
         }
       }),
     },
@@ -252,23 +318,23 @@ const ThinkingProcessAccordion = ({ thoughts, isComplete }) => {
   if (!thoughts || thoughts.length === 0) return null;
 
   return (
-    <div className="thoughts-accordion">
+    <div className="border rounded-md bg-muted/30 my-2">
       <button
-        className="thoughts-header-btn"
+        className="flex items-center justify-between w-full px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted/50 transition-colors"
         onClick={() => setIsOpen(!isOpen)}
       >
-        <div className="thoughts-summary">
+        <div className="flex items-center gap-2">
           <span>Thinking Process ({thoughts.length} steps)</span>
         </div>
-        {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        {isOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
       </button>
 
       {isOpen && (
-        <div className="thoughts-list">
+        <div className="p-3 border-t space-y-1.5">
           {thoughts.map((thought, i) => (
-            <div key={i} className="thought-item">
-              <span className="thought-dot"></span>
-              {thought}
+            <div key={i} className="flex items-start gap-2 text-xs text-muted-foreground">
+              <span className="mt-1.5 w-1 h-1 rounded-full bg-primary/50 shrink-0"></span>
+              <span className="leading-relaxed">{thought}</span>
             </div>
           ))}
         </div>
@@ -298,25 +364,31 @@ const TimingPopup = ({ timings }) => {
   if (!timings) return null;
 
   return (
-    <div className="timing-wrapper">
-      <button className="timing-btn" onClick={() => setIsOpen(!isOpen)} title="Show Execution Timings">
-        <Info size={14} />
-        <span className="timing-badge">{Math.round(elapsed)}s</span>
+    <div className="relative">
+      <button
+        className="flex items-center gap-1.5 px-2 py-1 rounded bg-muted/50 hover:bg-muted transition-colors text-[10px] text-muted-foreground"
+        onClick={() => setIsOpen(!isOpen)}
+        title="Show Execution Timings"
+      >
+        <Info size={10} />
+        <span className="font-mono">{Math.round(elapsed)}s</span>
       </button>
       {isOpen && (
-        <div className="timing-popup">
-          <div className="timing-header">
-            <h4>Execution Breakdown</h4>
-            <button onClick={() => setIsOpen(false)}><X size={14} /></button>
+        <div className="absolute right-0 top-full mt-2 z-50 w-64 rounded-md border bg-popover p-3 shadow-md text-popover-foreground animate-in fade-in zoom-in-95">
+          <div className="flex items-center justify-between border-b pb-2 mb-2">
+            <h4 className="text-xs font-semibold">Execution Breakdown</h4>
+            <button onClick={() => setIsOpen(false)} className="text-muted-foreground hover:text-foreground">
+              <X size={12} />
+            </button>
           </div>
-          <div className="timing-list">
+          <div className="space-y-1">
             {timings.steps.map((step, i) => (
-              <div key={i} className="timing-item">
-                <span className="timing-label" title={step.label}>{step.label}</span>
-                <span className="timing-duration">{step.duration ? step.duration.toFixed(1) + 's' : ''}</span>
+              <div key={i} className="flex justify-between text-[10px]">
+                <span className="truncate max-w-[140px]" title={step.label}>{step.label}</span>
+                <span className="font-mono text-muted-foreground">{step.duration ? step.duration.toFixed(1) + 's' : ''}</span>
               </div>
             ))}
-            <div className="timing-total">
+            <div className="flex justify-between border-t pt-2 mt-2 font-medium text-xs">
               <span>Total Time</span>
               <span>{elapsed.toFixed(1)}s</span>
             </div>
@@ -327,38 +399,116 @@ const TimingPopup = ({ timings }) => {
   );
 };
 
-// Helper component for signed Looker links
-const LookerLink = ({ url }) => {
-  const [isLoading, setIsLoading] = useState(false);
-
-  const handleClick = async (e) => {
-    e.preventDefault();
-    setIsLoading(true);
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/embed`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target_url: url })
-      });
-
-      if (!response.ok) throw new Error('Signing failed');
-
-      const data = await response.json();
-      window.open(data.url, '_blank');
-    } catch (err) {
-      console.error("Failed to open Looker link:", err);
-      // Fallback to trying to open original if signing fails (though likely won't work for embed users)
-      window.open(url, '_blank');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+const MetricCard = ({ data }) => {
+  // Support both single object or array of objects
+  const metrics = Array.isArray(data) ? data : [data];
 
   return (
-    <a href={url} onClick={handleClick} className="action-link" style={{ cursor: 'pointer', opacity: isLoading ? 0.7 : 1 }}>
-      {isLoading ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />}
-      {isLoading ? ' Opening...' : ' View Source Query'}
-    </a>
+    <div className="flex flex-wrap gap-4 my-4">
+      {metrics.map((metric, i) => (
+        <Card key={i} className="min-w-[140px] flex-1 bg-card/50 border-muted">
+          <CardContent className="p-4 pt-4">
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{metric.label}</div>
+            <div className="text-2xl font-bold mt-1 text-foreground">{metric.value}</div>
+            {metric.trend && (
+              <div className={`text-xs mt-1 font-medium ${metric.trend.includes('+') ? 'text-green-500' : metric.trend.includes('-') ? 'text-red-500' : 'text-muted-foreground'}`}>
+                {metric.trend}
+              </div>
+            )}
+            {metric.description && (
+              <div className="text-xs text-muted-foreground mt-2 border-t pt-2 mt-2 border-border/50">
+                {metric.description}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+};
+
+const QueryDetails = ({ details }) => {
+  const [isOpen, setIsOpen] = useState(false);
+
+  if (!details) return null;
+
+  return (
+    <div className="metadata-accordion">
+      <button
+        type="button"
+        className="metadata-header"
+        onClick={() => setIsOpen(!isOpen)}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px', background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', cursor: 'pointer', color: 'var(--text-primary)' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Code size={16} className="text-blue-400" />
+          <span style={{ fontWeight: 500 }}>Query Details</span>
+        </div>
+        {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+      </button>
+
+      {isOpen && (
+        <div className="metadata-content" style={{ marginTop: '8px', padding: '12px', background: 'rgba(0, 0, 0, 0.2)', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+          {details.question && (
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Question</div>
+              <div style={{ fontSize: '0.9rem' }}>{details.question}</div>
+            </div>
+          )}
+
+          {details.filters && (
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Filters</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {details.string_filters && details.string_filters.map((f, i) => (
+                  <span key={i} style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#93c5fd', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem', fontFamily: 'monospace' }}>
+                    {f.field_name}: {f.field_value}
+                  </span>
+                ))}
+                {/* Handle other filter formats if present */}
+                {!details.string_filters && details.filters && Array.isArray(details.filters) && details.filters.map((f, i) => (
+                  <span key={i} style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#93c5fd', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem', fontFamily: 'monospace' }}>
+                    {typeof f === 'string' ? f : JSON.stringify(f)}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {details.fields && (
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Fields</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                {details.fields.map((field, i) => (
+                  <span key={i} style={{ background: 'rgba(255, 255, 255, 0.1)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.8rem', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>
+                    {field}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {details.sql && (
+            <div>
+              <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '4px' }}>SQL</div>
+              <pre style={{ background: '#1e1e1e', padding: '8px', borderRadius: '4px', overflowX: 'auto', fontSize: '0.75rem', color: '#d4d4d4', margin: 0 }}>
+                {details.sql}
+              </pre>
+            </div>
+          )}
+
+          {/* Fallback for sql on top level if strictly following the user json blob structure where sql is outside query_details but maybe passed in prop combined */}
+          {!details.sql && details._sql_fallback && (
+            <div>
+              <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '4px' }}>SQL</div>
+              <pre style={{ background: '#1e1e1e', padding: '8px', borderRadius: '4px', overflowX: 'auto', fontSize: '0.75rem', color: '#d4d4d4', margin: 0 }}>
+                {details._sql_fallback}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -369,11 +519,11 @@ function App() {
   const [accessToken, setAccessToken] = useState(localStorage.getItem('looker_access_token'))
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [isDeepMode, setIsDeepMode] = useState(false) // Toggle state
+  const [agentType, setAgentType] = useState('fast') // 'fast', 'deep', or 'mcp'
   const [isLongQuery, setIsLongQuery] = useState(false);
   const messagesEndRef = useRef(null)
   // Generate a unique session ID when the component mounts
-  const [sessionId] = useState(() => 'session_' + Math.random().toString(36).substr(2, 9))
+  const [sessionId, setSessionId] = useState(() => 'session_' + Math.random().toString(36).substr(2, 9))
   const [isAutoTesting, setIsAutoTesting] = useState(false)
   const autoTestIntervalRef = useRef(null)
 
@@ -383,9 +533,116 @@ function App() {
   const [isRunningTests, setIsRunningTests] = useState(false);
   const [currentThought, setCurrentThought] = useState(null); // Track live status
 
-  // Questions moved to config/questions.js
+  // Dataset config loaded from API
+  const [datasetConfig, setDatasetConfig] = useState({
+    name: '',
+    display_name: 'Gaming Analytics',
+    starter_questions: DEFAULT_STARTER_QUESTIONS,
+    test_scenarios: DEFAULT_TEST_SCENARIOS,
+    dashboards: DEFAULT_DASHBOARDS
+  });
+
+  // Load dataset config from API on mount
+  useEffect(() => {
+    const fetchDatasetConfig = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/dataset-config`);
+        if (response.ok) {
+          const config = await response.json();
+          setDatasetConfig(config);
+          // Set initial dashboard if available
+          if (config.dashboards && config.dashboards.length > 0) {
+            setActiveDashboard(config.dashboards[0].id);
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to load dataset config:', e);
+      }
+    };
+    fetchDatasetConfig();
+  }, []);
 
   const [isTestMenuOpen, setIsTestMenuOpen] = useState(false);
+  const [isHistoryMenuOpen, setIsHistoryMenuOpen] = useState(false);
+  const [history, setHistory] = useState([]);
+
+  // Fetch history
+  const fetchHistory = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/history`);
+      if (res.ok) {
+        setHistory(await res.json());
+      }
+    } catch (e) {
+      console.error("Failed to load history", e);
+    }
+  };
+
+  useEffect(() => {
+    if (isHistoryMenuOpen) {
+      fetchHistory();
+    }
+  }, [isHistoryMenuOpen]);
+
+  const loadSession = async (id) => {
+    setIsLoading(true);
+    setIsHistoryMenuOpen(false);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/history/${id}`);
+      if (res.ok) {
+        const msgs = await res.json();
+        // Ensure msgs has at least one item or default
+        if (msgs.length === 0) {
+          setMessages([{ role: 'agent', content: 'Hello! I am your mobile gaming data analyst. How can I help you today?' }]);
+        } else {
+          // Normalize loaded messages: 'model' -> 'agent', and preserve rich data
+          const normalizedMsgs = msgs.map(msg => ({
+            ...msg,
+            role: msg.role === 'model' ? 'agent' : msg.role,
+            // Preserve rich data fields if they exist
+            tableData: msg.tableData || null,
+            chartConfig: msg.chartConfig || null,
+            link: msg.link || null,
+            thoughts: msg.thoughts || [],
+            timings: msg.timings || null
+          }));
+          setMessages(normalizedMsgs);
+        }
+        // Force set session ID (this might need state update logic if sessionId is const/state)
+        // Since sessionId is state, we need to add setSessionId to the hook above first.
+        setSessionId(id);
+      }
+    } catch (e) {
+      console.error("Failed to load session", e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const deleteSession = async (e, id) => {
+    e.stopPropagation(); // Prevent loading the session
+    if (!window.confirm("Are you sure you want to delete this conversation?")) return;
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/history/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setHistory(prev => prev.filter(item => item.id !== id));
+        // If we deleted the current session, start a new one
+        if (id === sessionId) {
+          startNewChat();
+        }
+      }
+    } catch (e) {
+      console.error("Failed to delete session", e);
+    }
+  };
+
+  const startNewChat = () => {
+    const newId = 'session_' + Math.random().toString(36).substr(2, 9);
+    setSessionId(newId);
+    setMessages([{ role: 'agent', content: 'Hello! I am your mobile gaming data analyst. How can I help you today?' }]);
+    setIsHistoryMenuOpen(false);
+  };
 
   const runScenario = async (question) => {
     setIsTestMenuOpen(false);
@@ -396,7 +653,7 @@ function App() {
     await handleSubmit(null, question);
   };
 
-  const [activeDashboard, setActiveDashboard] = useState(DASHBOARDS[0]?.id || 'overview'); // Changed to use ID
+  const [activeDashboard, setActiveDashboard] = useState('overview');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   const [sidebarWidth, setSidebarWidth] = useState(600);
@@ -477,7 +734,7 @@ function App() {
     const fetchSignedUrl = async () => {
       if (!activeDashboard || !accessToken) return;
 
-      const dashboard = DASHBOARDS.find(d => d.id === activeDashboard);
+      const dashboard = datasetConfig.dashboards.find(d => d.id === activeDashboard);
       if (!dashboard) return;
 
       try {
@@ -514,7 +771,7 @@ function App() {
     };
 
     fetchSignedUrl();
-  }, [activeDashboard, accessToken]); // Dependency on activeDashboard and login state
+  }, [activeDashboard, accessToken, datasetConfig.dashboards]); // Also depend on dashboard config loading
 
 
   const login = useGoogleLogin({
@@ -536,6 +793,33 @@ function App() {
       abortControllerRef.current = null;
     }
     setIsLoading(false);
+  };
+
+  const handleLookerLinkClick = async (url) => {
+    // Optimistically set signedUrl to trigger iframe reload or just use the url if signing isn't needed/fails
+    setEmbedError(null);
+    setSignedUrl(null); // Force reload
+
+    // We can assume the iframe will handle it, but since we are replacing the dashboard,
+    // let's try to sign it first to be safe, similar to how fetchSignedUrl works.
+    console.log('Handling Looker Link Click:', url);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/embed`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target_url: url })
+      });
+
+      if (!response.ok) throw new Error('Signing failed');
+
+      const data = await response.json();
+      setSignedUrl(data.url);
+    } catch (e) {
+      console.error("Link Signing Error:", e);
+      // Fallback to raw URL if signing fails
+      setSignedUrl(url);
+    }
   };
 
   // Refactored handleSubmit to accept an optional message argument and return a promise
@@ -561,14 +845,16 @@ function App() {
     const requestPayload = {
       message: userMessage,
       session_id: sessionId,
-      deep_analysis: isDeepMode,
+      agent_type: agentType,
       force_refresh: options.forceRefresh || false
     }
     console.log('Sending request:', requestPayload)
 
     try {
-      console.log(`Fetching from ${API_BASE_URL}/chat...`)
-      const response = await fetch(`${API_BASE_URL}/chat`, {
+      // Use fast-query endpoint for fast mode, regular /chat for others
+      const endpoint = agentType === 'fast' ? '/fast-query' : '/chat';
+      console.log(`Fetching from ${API_BASE_URL}${endpoint}...`)
+      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -595,6 +881,7 @@ function App() {
       const decoder = new TextDecoder()
       let fullResponse = ''
       let buffer = ''
+      let showChartRequested = false // Track explicit chart requests
 
       // Debug: Track parsed chunks
       const parsedChunks = []
@@ -699,10 +986,173 @@ function App() {
               return newMessages
             })
           } else {
+            // Check for JSON DATA lines
+            if (line.startsWith('DATA: {')) {
+              try {
+                const jsonContent = JSON.parse(line.substring(6))
+                if (jsonContent.type === 'json_table') {
+                  setMessages(prev => {
+                    const newMessages = [...prev]
+                    const lastMsg = newMessages[newMessages.length - 1]
+                    if (lastMsg.role === 'agent') {
+                      lastMsg.tableData = jsonContent.data
+
+                      // Auto-generate chart if applicable AND requested
+                      if (!lastMsg.chartConfig && jsonContent.data.rows.length > 1 && showChartRequested) {
+                        const fields = jsonContent.data.fields || []
+                        const rows = jsonContent.data.rows || []
+
+                        // Heuristic: 1 date/cat + 1 metric
+                        const dimension = fields.find(f => f.name.includes('date') || f.name.includes('month') || f.name.includes('name'))
+                        const metric = fields.find(f => !f.name.includes('date') && !f.name.includes('month') && !f.name.includes('name'))
+
+                        if (dimension && metric) {
+                          lastMsg.chartConfig = {
+                            type: fields.length > 2 ? 'bar' : 'line',
+                            data: {
+                              labels: rows.map(r => r[dimension.name]),
+                              datasets: [{
+                                label: metric.label,
+                                data: rows.map(r => r[metric.name]),
+                                backgroundColor: 'rgba(53, 162, 235, 0.5)',
+                                borderColor: 'rgb(53, 162, 235)',
+                                borderWidth: 1
+                              }]
+                            },
+                            options: {
+                              responsive: true,
+                              plugins: {
+                                legend: { position: 'top' },
+                                title: { display: true, text: metric.label }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                    return newMessages
+                  })
+                  continue
+                } else if (jsonContent.type === 'json_link') {
+                  setMessages(prev => {
+                    const newMessages = [...prev]
+                    const lastMsg = newMessages[newMessages.length - 1]
+                    if (lastMsg.role === 'agent') {
+                      lastMsg.link = jsonContent.url
+                    }
+                    return newMessages
+                  })
+                  continue
+                } else if (jsonContent.type === 'json_chart') {
+                  // Treat specific chart event as a signal to show chart
+                  showChartRequested = true;
+
+                  // Trigger chart generation logic - search for tableData in recent messages
+                  setMessages(prev => {
+                    const newMessages = [...prev]
+                    const lastMsg = newMessages[newMessages.length - 1]
+
+                    // Find the most recent tableData from any agent message
+                    let tableData = null;
+                    for (let i = newMessages.length - 1; i >= 0; i--) {
+                      if (newMessages[i].role === 'agent' && newMessages[i].tableData) {
+                        tableData = newMessages[i].tableData;
+                        break;
+                      }
+                    }
+
+                    if (lastMsg.role === 'agent' && tableData && !lastMsg.chartConfig) {
+                      const fields = tableData.fields || []
+                      const rows = tableData.rows || []
+
+                      if (rows.length >= 1) {
+                        const dimension = fields.find(f => f.name.includes('date') || f.name.includes('month') || f.name.includes('name'))
+                        const metric = fields.find(f => !f.name.includes('date') && !f.name.includes('month') && !f.name.includes('name'))
+
+                        if (dimension && metric) {
+                          lastMsg.chartConfig = {
+                            type: 'bar', // Default to bar for follow-up chart requests
+                            data: {
+                              labels: rows.map(r => r[dimension.name]),
+                              datasets: [{
+                                label: metric.label,
+                                data: rows.map(r => r[metric.name]),
+                                backgroundColor: 'rgba(53, 162, 235, 0.5)',
+                                borderColor: 'rgb(53, 162, 235)',
+                                borderWidth: 1
+                              }]
+                            },
+                            options: {
+                              responsive: true,
+                              plugins: {
+                                legend: { position: 'top' },
+                                title: { display: true, text: metric.label }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                    return newMessages
+                  })
+                  continue
+                }
+              } catch (e) {
+                // Not JSON, treat as text
+              }
+            }
+
             // Assume it's data content
             let contentLine = line;
             if (line.startsWith('DATA: ')) {
               contentLine = line.substring(6);
+            }
+
+            // Check for explicit chart request signal
+            if (contentLine.includes('SHOW_CHART')) {
+              showChartRequested = true;
+              contentLine = contentLine.replace('SHOW_CHART', '').trim();
+
+              // If we received the signal BUT we already processed the table data (race condition),
+              // we need to trigger the chart generation now.
+              setMessages(prev => {
+                const newMessages = [...prev]
+                const lastMsg = newMessages[newMessages.length - 1]
+                if (lastMsg.role === 'agent' && lastMsg.tableData && !lastMsg.chartConfig) {
+                  // We have data but no chart, and we just got the signal. Generate it!
+                  const fields = lastMsg.tableData.fields || []
+                  const rows = lastMsg.tableData.rows || []
+
+                  if (rows.length > 1) {
+                    const dimension = fields.find(f => f.name.includes('date') || f.name.includes('month') || f.name.includes('name'))
+                    const metric = fields.find(f => !f.name.includes('date') && !f.name.includes('month') && !f.name.includes('name'))
+
+                    if (dimension && metric) {
+                      lastMsg.chartConfig = {
+                        type: fields.length > 2 ? 'bar' : 'line',
+                        data: {
+                          labels: rows.map(r => r[dimension.name]),
+                          datasets: [{
+                            label: metric.label,
+                            data: rows.map(r => r[metric.name]),
+                            backgroundColor: 'rgba(53, 162, 235, 0.5)',
+                            borderColor: 'rgb(53, 162, 235)',
+                            borderWidth: 1
+                          }]
+                        },
+                        options: {
+                          responsive: true,
+                          plugins: {
+                            legend: { position: 'top' },
+                            title: { display: true, text: metric.label }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+                return newMessages
+              })
             }
 
             // Append with newline to preserve formatting
@@ -762,12 +1212,18 @@ function App() {
     let currentIndex = 0;
 
     const runNext = async () => {
-      if (currentIndex >= TEST_QUESTIONS.length || !isAutoTesting) {
+      // Use test_scenarios instead of starter_questions
+      const scenarios = datasetConfig.test_scenarios || [];
+
+      if (currentIndex >= scenarios.length || !isAutoTesting) {
         setIsAutoTesting(false);
         return;
       }
 
-      const question = TEST_QUESTIONS[currentIndex];
+      // test_scenarios items are objects { label, question }, starter_questions are strings
+      const item = scenarios[currentIndex];
+      const question = typeof item === 'string' ? item : item.question;
+
       setInput(question);
 
       // Wait a bit to show the question in the input
@@ -803,6 +1259,24 @@ function App() {
 
   // Memoize the markdown components to prevent re-renders on every keystroke
   const markdownComponents = useRef({
+    a({ node, href, children, ...props }) {
+      // Intercept Looker links (or all links if we want everything embedded)
+      // For now, let's assume if it starts with http/https it might be external, 
+      // but if we want to force embed behavior for known Looker domains or all links:
+      return (
+        <a
+          href={href}
+          onClick={(e) => {
+            e.preventDefault();
+            handleLookerLinkClick(href);
+          }}
+          className="text-blue-500 hover:underline cursor-pointer"
+          {...props}
+        >
+          {children}
+        </a>
+      );
+    },
     code({ node, inline, className, children, ...props }) {
       const match = /language-(\w+)/.exec(className || '')
       const lang = match ? match[1] : '';
@@ -817,26 +1291,60 @@ function App() {
           }
         } catch (e) {
           console.error("Chart JSON Parse Error:", e);
-          // Fallthrough to render as code if parsing fails
         }
       }
 
-      // Handle Metadata - REMOVED per user request
-      /*
-      const isMetadata = !inline && (
-        lang === 'json-metadata' ||
-        (lang === 'json' && (
-          String(children).includes('"fields":') ||
-          String(children).includes('"filters":') ||
-          String(children).includes('"sql":') ||
-          String(children).includes('"metric":') ||
-          String(children).includes('"query_details":')
-        ))
+      // Handle Query Details
+      // We look for specific keys that indicate this is a query details blob
+      const content = String(children);
+      const isQueryDetails = !inline && (
+        lang === 'json' && (
+          content.includes('"query_details":') ||
+          (content.includes('"sql":') && content.includes('"fields":'))
+        )
       );
-      if (isMetadata) {
-         return null; // Don't render anything
+
+      if (isQueryDetails) {
+        try {
+          const parsed = JSON5.parse(content);
+          // Support both direct object or wrapped in query_details
+          let details = parsed.query_details || parsed;
+
+          // If the SQL is at the top level but not inside query_details (as per user example), merge it
+          if (parsed.sql && !details.sql) {
+            details = { ...details, _sql_fallback: parsed.sql };
+          }
+
+          return <QueryDetails details={details} />;
+        } catch (e) {
+          console.error("Query Details Parse Error:", e);
+        }
       }
-      */
+
+      // Handle JSON Metrics
+      // Check explicit tag OR heuristic check for metric structure
+      const isMetric = !inline && (
+        lang === 'json-metric' ||
+        (lang === 'json' && String(children).includes('"label":') && String(children).includes('"value":'))
+      );
+
+      if (isMetric) {
+        try {
+          const content = String(children);
+          const data = JSON5.parse(content);
+
+          // Validate structure (Duck typing)
+          const validItem = (item) => item && typeof item.label === 'string' && typeof item.value !== 'undefined';
+          const isValid = Array.isArray(data) ? data.every(validItem) : validItem(data);
+
+          if (isValid) {
+            return <MetricCard data={data} />;
+          }
+        } catch (e) {
+          // If parsing fails or validation fails, fall through to normal code block
+          // console.error("Metric Parse Error", e);
+        }
+      }
 
       // Handle SQL
       if (!inline && lang === 'sql') {
@@ -860,6 +1368,7 @@ function App() {
     }
   }).current
 
+
   const logout = () => {
     setAccessToken(null);
     localStorage.removeItem('looker_access_token');
@@ -867,54 +1376,48 @@ function App() {
 
   if (!accessToken) {
     return (
-      <div className="login-container">
-        <div className="login-card glass">
-          <h1>Gaming Analytics</h1>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem' }}>Sign in to access your organization dashboard</p>
-          <button onClick={() => login()} className="login-btn">
-            Connect to Looker
-          </button>
-        </div>
+      <div className="flex min-h-screen items-center justify-center bg-background p-4">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <CardTitle className="text-2xl font-bold text-primary">Gaming Analytics</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col items-center gap-4">
+            <p className="text-muted-foreground text-center">
+              Sign in to access your organization dashboard
+            </p>
+            <Button onClick={() => login()} className="w-full" size="lg">
+              Connect to Looker
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     )
   }
 
-  const currentDashboard = DASHBOARDS.find(d => d.id === activeDashboard);
+  const currentDashboard = datasetConfig.dashboards.find(d => d.id === activeDashboard);
 
   return (
-    <div className="app-container">
+    <div className="flex h-screen w-full overflow-hidden bg-background">
       {/* Navigation Rail */}
 
 
       {/* Main Workspace */}
-      <div className="main-workspace">
-        <header className="workspace-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ padding: 8, background: 'rgba(37, 99, 235, 0.1)', borderRadius: 8 }}>
-              <Bot className="bot-icon" style={{ color: 'var(--primary-color)' }} size={24} />
+      <div className="flex flex-1 flex-col overflow-hidden">
+        <header className="flex items-center justify-between border-b bg-background px-6 py-4">
+          <div className="flex items-center gap-3">
+            <div className="rounded-lg bg-primary/10 p-2">
+              <Bot className="text-primary h-6 w-6" />
             </div>
-            <span style={{ fontWeight: 600, fontSize: '1.2rem', color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>Gaming Analytics</span>
+            <span className="text-lg font-semibold text-foreground whitespace-nowrap">Gaming Analytics</span>
 
             {/* Dashboard Selection Dropdown */}
-            <div style={{ position: 'relative', marginLeft: '1rem' }}>
+            <div className="relative ml-4">
               <select
                 value={activeDashboard}
                 onChange={(e) => setActiveDashboard(e.target.value)}
-                style={{
-                  appearance: 'none',
-                  padding: '8px 32px 8px 12px',
-                  borderRadius: '8px',
-                  border: '1px solid var(--border-color)',
-                  background: 'var(--bg-primary)',
-                  color: 'var(--text-primary)',
-                  fontSize: '0.9rem',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  outline: 'none',
-                  minWidth: '200px'
-                }}
+                className="h-10 min-w-[200px] cursor-pointer rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
               >
-                {DASHBOARDS.map((dash) => (
+                {datasetConfig.dashboards.map((dash) => (
                   <option key={dash.id} value={dash.id}>
                     {dash.title}
                   </option>
@@ -1006,13 +1509,13 @@ function App() {
       {/* Assistant Sidebar */}
       <aside
         ref={sidebarRef}
-        className={`assistant-sidebar ${isSidebarOpen ? '' : 'collapsed'}`}
+        className={`flex flex-col border-l bg-background transition-all duration-300 ${isSidebarOpen ? '' : 'w-0 opacity-0 overflow-hidden'}`}
         style={{ width: isSidebarOpen ? sidebarWidth : 0 }}
       >
-        <header className="sidebar-header">
-          <div className="sidebar-title">
-            <h3 style={{ display: 'flex', alignItems: 'center', gap: 8, textTransform: 'none' }}>
-              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <header className="flex items-center justify-between border-b px-4 py-3">
+          <div className="flex items-center gap-2">
+            <h3 className="flex items-center gap-2 text-sm font-semibold">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M12 2A10 10 0 0 0 2 12" stroke="#EA4335" strokeWidth="4" />
                 <path d="M12 2A10 10 0 0 1 22 12" stroke="#4285F4" strokeWidth="4" />
                 <path d="M22 12A10 10 0 0 1 12 22" stroke="#34A853" strokeWidth="4" />
@@ -1021,46 +1524,91 @@ function App() {
               <span>Agent</span>
             </h3>
           </div>
-          <div className="sidebar-actions" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            {/* Mode Toggle */}
-            <div className="mode-toggle-container">
-              <button
-                className={`mode-toggle-btn ${!isDeepMode ? 'active' : ''}`}
-                onClick={() => setIsDeepMode(false)}
-                title="Fast Mode"
+          <div className="flex items-center gap-2">
+            {/* New Chat Button */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-foreground"
+              onClick={startNewChat}
+              title="New Chat"
+            >
+              <MessageSquare className="h-4 w-4" />
+              <span className="sr-only">New Chat</span>
+            </Button>
+
+            {/* History Dropdown */}
+            <div className="relative">
+              <Button
+                variant="ghost"
+                size="icon"
+                className={`h-8 w-8 text-muted-foreground hover:text-foreground ${isHistoryMenuOpen ? 'bg-muted' : ''}`}
+                onClick={() => setIsHistoryMenuOpen(!isHistoryMenuOpen)}
+                title="History"
               >
-                <Zap size={14} />
-                <span>Fast</span>
-              </button>
-              <button
-                className={`mode-toggle-btn ${isDeepMode ? 'active' : ''}`}
-                onClick={() => setIsDeepMode(true)}
-                title="Deep Analysis Mode"
-              >
-                <Brain size={14} />
-                <span>Deep</span>
-              </button>
+                <div style={{ transform: 'rotate(0deg)' }}>
+                  {/* Clock Icon can be imported or SVG */}
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                </div>
+              </Button>
+
+              {isHistoryMenuOpen && (
+                <div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-md border bg-popover shadow-md animate-in fade-in zoom-in-95 max-h-[400px] overflow-y-auto">
+                  <div className="px-3 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider border-b sticky top-0 bg-popover">
+                    Recent Conversations
+                  </div>
+                  {history.length === 0 ? (
+                    <div className="p-4 text-center text-xs text-muted-foreground">No history found</div>
+                  ) : (
+                    history.map((item) => (
+                      <div
+                        key={item.id}
+                        className={`group flex items-center w-full hover:bg-muted transition-colors border-b border-muted/20 ${sessionId === item.id ? 'bg-muted/50' : ''}`}
+                      >
+                        <button
+                          className="flex-1 px-3 py-2 text-left text-xs"
+                          onClick={() => loadSession(item.id)}
+                        >
+                          <div className={`line-clamp-1 ${sessionId === item.id ? 'font-medium' : ''}`}>{item.title || "Untitled Conversation"}</div>
+                          <div className="text-[10px] text-muted-foreground mt-0.5">
+                            {new Date(item.updated_at).toLocaleDateString()} {new Date(item.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </button>
+                        <button
+                          className="p-2 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                          onClick={(e) => deleteSession(e, item.id)}
+                          title="Delete Conversation"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
+
+            <div className="h-4 w-px bg-border mx-1" />
             {/* Test Controls - Scenarios Dropdown */}
-            <div style={{ marginRight: 'auto', display: 'flex', gap: '0.5rem', position: 'relative' }}>
-              <div style={{ position: 'relative' }}>
-                <button
-                  className="test-menu-trigger"
+            <div className="relative">
+              <div className="relative">
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => setIsTestMenuOpen(!isTestMenuOpen)}
-                  title="Scenarios"
-                  style={{ width: 'auto', padding: '0 12px', fontSize: '0.8rem', height: 32 }}
+                  className="h-8 gap-1 text-xs"
                 >
-                  Scenarios <ChevronDown size={14} style={{ marginLeft: 4, opacity: 0.7 }} />
-                </button>
+                  Scenarios <ChevronDown className="h-3 w-3 opacity-50" />
+                </Button>
                 {isTestMenuOpen && (
-                  <div className="test-menu-dropdown glass" style={{ right: 0, width: 200, top: '100%' }}>
-                    <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border-color)', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                  <div className="absolute right-0 top-full z-50 mt-1 w-48 rounded-md border bg-popover shadow-md animate-in fade-in zoom-in-95">
+                    <div className="px-3 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider border-b">
                       TEST SCENARIOS
                     </div>
-                    {DEEP_TEST_QUESTIONS.map((item, i) => (
+                    {datasetConfig.test_scenarios.map((item, i) => (
                       <button
                         key={i}
-                        className="test-menu-item"
+                        className="w-full px-3 py-2 text-left text-xs hover:bg-muted focus:bg-muted transition-colors"
                         onClick={() => runScenario(item.question)}
                       >
                         {item.label}
@@ -1071,29 +1619,30 @@ function App() {
               </div>
             </div>
 
-            <button
-              className={`nav-item ${isAutoTesting ? 'active' : ''}`}
+            <Button
+              variant={isAutoTesting ? "secondary" : "ghost"}
+              size="sm"
               onClick={() => setIsAutoTesting(!isAutoTesting)}
+              className="h-8 gap-1 text-xs"
               title={isAutoTesting ? "Stop Auto Test" : "Start Auto Test"}
-              style={{ width: 'auto', padding: '0 12px', height: 32 }}
             >
-              <LayoutDashboard size={16} /> {/* Placeholder icon for test */}
-              <span style={{ fontSize: '0.8rem' }}>{isAutoTesting ? "Stop" : "Auto Test"}</span>
-            </button>
+              <LayoutDashboard size={14} />
+              <span>{isAutoTesting ? "Stop" : "Auto Test"}</span>
+            </Button>
 
-            <button className="nav-item" onClick={() => setIsSidebarOpen(false)} style={{ width: 32, height: 32 }}>
-              <X size={16} />
-            </button>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setIsSidebarOpen(false)}>
+              <X className="h-4 w-4" />
+            </Button>
           </div>
         </header>
 
-        <div className="chat-messages">
+        <div className="flex-1 overflow-y-auto p-4 space-y-6">
           {messages.map((msg, index) => (
-            <div key={index} className={`message ${msg.role}`}>
-              <div className="message-header" style={{ justifyContent: msg.role === 'agent' ? 'flex-start' : 'flex-end' }}>
+            <div key={index} className={`flex flex-col ${msg.role === 'agent' ? 'items-start' : 'items-end'}`}>
+              <div className={`flex items-center gap-2 mb-1 ${msg.role === 'agent' ? '' : 'flex-row-reverse'}`}>
                 {msg.role === 'agent' && (
-                  <span className="message-role" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Bot size={14} /> Analyst
+                  <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                    <Bot size={12} /> Analyst
                   </span>
                 )}
                 {/* User label hidden for cleaner look */}
@@ -1101,14 +1650,17 @@ function App() {
                 {msg.role === 'agent' && msg.timings && <TimingPopup timings={msg.timings} />}
               </div>
 
-              <div className="message-bubble">
+              <div className={`relative max-w-[85%] rounded-lg p-3 text-sm leading-relaxed shadow-sm ${msg.role === 'agent'
+                ? 'bg-muted text-foreground'
+                : 'bg-primary text-primary-foreground'
+                }`}>
                 {msg.thoughts && msg.thoughts.length > 0 && (
                   <ThinkingProcessAccordion
                     thoughts={msg.thoughts}
                     isComplete={index !== messages.length - 1 || !isLoading}
                   />
                 )}
-                <div className="message-text">
+                <div className={`prose prose-sm dark:prose-invert max-w-none ${msg.role === 'user' ? 'text-primary-foreground' : ''}`}>
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={markdownComponents}
@@ -1117,38 +1669,58 @@ function App() {
                   </ReactMarkdown>
                 </div>
 
-                {msg.link && (
-                  <div className="message-actions">
-                    <LookerLink url={msg.link} />
+                {/* Structured Data Renderer (Table & Chart) */}
+                {msg.tableData && (
+                  <DataTableRenderer
+                    data={msg.tableData}
+                    link={msg.link}
+                    onLinkClick={handleLookerLinkClick}
+                  />
+                )}
+
+                {/* Auto-Generated Chart */}
+                {msg.chartConfig && (
+                  <div className="mt-4 p-4 bg-background rounded-lg border h-[300px]">
+                    <ChartRenderer config={msg.chartConfig} />
                   </div>
                 )}
 
+                {!msg.tableData && msg.link && (
+                  <div className="mt-2 text-right">
+                    <LookerLink url={msg.link} onLinkClick={handleLookerLinkClick} />
+                  </div>
+                )}
+
+
                 {msg.role === 'agent' && !msg.isStreaming && msg.thoughts && msg.thoughts.some(t => t.includes("Found similar question in cache")) && (
-                  <div className="message-actions" style={{ marginTop: '8px' }}>
-                    <button
-                      className="action-link"
+                  <div className="mt-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       onClick={() => {
-                        // Find the user prompt for this message. It's normally the one right before.
-                        // We are mapping 'messages', so we have 'i'.
                         const prompt = messages[i - 1]?.content;
                         if (prompt) {
                           handleSubmit(null, prompt, { forceRefresh: true });
                         }
                       }}
                       disabled={isLoading}
-                      style={{ cursor: isLoading ? 'not-allowed' : 'pointer', background: 'none', border: 'none', display: 'flex', alignItems: 'center', gap: '4px', color: '#64748b', fontSize: '0.8rem', padding: 0 }}
+                      className="h-auto p-0 text-xs text-muted-foreground hover:text-foreground gap-1"
                     >
-                      <RefreshCw size={14} className={isLoading ? "animate-spin" : ""} />
+                      <RefreshCw size={12} className={isLoading ? "animate-spin" : ""} />
                       Refresh Data (Bypass Cache)
-                    </button>
+                    </Button>
                   </div>
                 )}
 
                 {msg.suggestions && msg.suggestions.length > 0 && (
-                  <div className="suggestions-container">
-                    <div className="suggestions-list">
+                  <div className="mt-4">
+                    <div className="flex flex-wrap gap-2">
                       {msg.suggestions.map((suggestion, i) => (
-                        <button key={i} className="suggestion-chip" onClick={() => handleSubmit(null, suggestion)}>
+                        <button
+                          key={i}
+                          className="px-3 py-1.5 text-xs font-medium rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                          onClick={() => handleSubmit(null, suggestion)}
+                        >
                           {suggestion}
                         </button>
                       ))}
@@ -1160,14 +1732,18 @@ function App() {
           ))}
 
           {messages.length === 1 && !isLoading && (
-            <div className="starter-questions-container">
-              <div className="starter-header">
-                <span className="sparkle-icon">✨</span>
-                <span className="starter-label">Suggested Queries</span>
+            <div className="mt-8 flex flex-col items-center gap-4">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <span className="text-lg">✨</span>
+                <span className="font-medium">Suggested Queries</span>
               </div>
-              <div className="starter-list">
-                {STARTER_QUESTIONS.map((q, i) => (
-                  <button key={i} onClick={() => handleSubmit(null, q)} className="starter-chip">
+              <div className="flex flex-wrap justify-center gap-2 max-w-lg">
+                {datasetConfig.starter_questions.map((q, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleSubmit(null, q)}
+                    className="px-4 py-2 text-sm rounded-full border bg-background hover:bg-muted transition-colors text-foreground shadow-sm"
+                  >
                     {q}
                   </button>
                 ))}
@@ -1176,36 +1752,66 @@ function App() {
           )}
 
           {isLoading && (
-            <div className="message agent">
-              <div className="message-bubble">
-                <div className="message-text loading" style={{ color: 'var(--primary-color)' }}>
-                  <Loader2 className="animate-spin" size={16} />
-                  <span>{currentThought || (isLongQuery ? "Thinking..." : "Processing...")}</span>
-                </div>
+            <div className="flex flex-col items-start">
+              <div className="bg-muted text-foreground relative max-w-[85%] rounded-lg p-3 text-sm shadow-sm flex items-center gap-3">
+                <Loader2 className="animate-spin text-primary" size={16} />
+                <span className="animate-pulse">{currentThought || (isLongQuery ? "Thinking..." : "Processing...")}</span>
               </div>
             </div>
           )}
           <div ref={messagesEndRef} />
         </div>
 
-        <footer className="assistant-input-area">
-          <form onSubmit={handleSubmit} className="input-wrapper">
-            <input
+        <footer className="border-t bg-background p-4 flex flex-col gap-2">
+          {/* Agent Mode Toggle */}
+          <div className="flex justify-center gap-1 mb-2">
+            <Button
+              variant={agentType === 'fast' ? "default" : "secondary"}
+              size="sm"
+              onClick={() => setAgentType('fast')}
+              className="h-7 text-xs px-3"
+              title="Fast Mode - Quick answers"
+            >
+              <Zap size={12} className="mr-1.5" /> Fast
+            </Button>
+            <Button
+              variant={agentType === 'deep' ? "default" : "secondary"}
+              size="sm"
+              onClick={() => setAgentType('deep')}
+              className="h-7 text-xs px-3"
+              title="Deep Analysis Mode"
+            >
+              <Brain size={12} className="mr-1.5" /> Deep
+            </Button>
+            <Button
+              variant={agentType === 'mcp' ? "default" : "secondary"}
+              size="sm"
+              onClick={() => setAgentType('mcp')}
+              className="h-7 text-xs px-3"
+              title="MCP Mode"
+            >
+              <Code size={12} className="mr-1.5" /> MCP
+            </Button>
+          </div>
+          <div className="flex w-full items-center space-x-2">
+            <Input
               type="text"
+              placeholder="Query gaming data..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Query gaming data..."
               disabled={isLoading}
+              className="flex-1"
             />
-            <button
+            <Button
               type={isLoading ? "button" : "submit"}
-              className={`send-btn ${isLoading ? 'stop-btn' : ''}`}
+              onClick={isLoading ? handleStop : handleSubmit}
               disabled={!input.trim() && !isLoading}
-              onClick={isLoading ? handleStop : undefined}
+              size="icon"
+              variant={isLoading ? "destructive" : "default"}
             >
-              {isLoading ? <Square size={20} fill="currentColor" /> : <Send size={20} />}
-            </button>
-          </form>
+              {isLoading ? <Square className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+            </Button>
+          </div>
         </footer>
 
       </aside>

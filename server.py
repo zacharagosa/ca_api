@@ -45,24 +45,34 @@ def chat():
     data = request.json
     user_input = data.get('message')
     deep_analysis = data.get('deep_analysis', False)
+    agent_type = data.get('agent_type', 'fast')  # 'fast', 'deep', or 'mcp'
     user_id = data.get('user_id', 'web_user')
     session_id = data.get('session_id', 'default_session') # Use session_id if provided, else default
     force_refresh = data.get('force_refresh', False)
     
     if not user_input:
         return jsonify({'error': 'No message provided'}), 400
+        
+    start_time = time.time()
+    
+    # Save User Message immediately
+    conversation_manager.save_message(session_id, 'user', user_input)
+    
+    # Get the appropriate agent app based on type
+    current_agent_app = agent.get_agent_app(agent_type)
+    print(f"Using agent type: {agent_type}")
     
     try:
         # Check if session exists, if not create it
         try:
             # Try to get the session. Note: get_session requires user_id as well.
-            agent_app.get_session(session_id=session_id, user_id=user_id)
+            current_agent_app.get_session(session_id=session_id, user_id=user_id)
         except Exception:
             # If get_session fails, it likely means the session doesn't exist.
             # So we try to create it.
             print(f"Session {session_id} not found (or get failed). Creating new session...")
             try:
-                agent_app.create_session(session_id=session_id, user_id=user_id)
+                current_agent_app.create_session(session_id=session_id, user_id=user_id)
             except Exception as create_error:
                  # If creation fails because it already exists, that's fine, we can proceed.
                  if "already exists" in str(create_error):
@@ -87,15 +97,15 @@ def chat():
                 agent.set_access_token(access_token)
 
             try:
-                # Prepend explicit instruction based on user mode
+                # Prepend explicit instruction based on user mode (skip for MCP)
                 final_input = user_input
-                instruction_prefix = ""
-                if deep_analysis:
-                     instruction_prefix = "Instruction: PERFORM_DEEP_ANALYSIS. Question: "
-                     final_input = f"{instruction_prefix}{user_input}"
+                if agent_type == 'mcp':
+                    # MCP agent handles the request directly
+                    pass
+                elif deep_analysis or agent_type == 'deep':
+                    final_input = f"Instruction: PERFORM_DEEP_ANALYSIS. Question: {user_input}"
                 else:
-                     instruction_prefix = "Instruction: FAST_RESPONSE. Question: "
-                     final_input = f"{instruction_prefix}{user_input}"
+                    final_input = f"Instruction: FAST_RESPONSE. Question: {user_input}"
 
                 # 1. Check Cache (only if not forced)
                 cached_response = None
@@ -111,8 +121,7 @@ def chat():
                     return
 
                 # 2. Run Agent
-                # Always use the unified agent stream with the modified input
-                stream = agent_app.stream_query(message=final_input, user_id=user_id, session_id=session_id)
+                stream = current_agent_app.stream_query(message=final_input, user_id=user_id, session_id=session_id)
                 
                 full_response_accumulator = []
                 
@@ -140,6 +149,10 @@ def chat():
                         cache_manager.add_to_cache(final_input, full_text)
                     except Exception as e:
                         print(f"Failed to cache response: {e}")
+
+                # Save Agent Response to History
+                if full_text.strip():
+                     conversation_manager.save_message(session_id, 'model', full_text)
 
                 response_queue.put(("done", None))
             except Exception as e:
@@ -204,6 +217,138 @@ def chat():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/fast-query', methods=['POST', 'OPTIONS'])
+def fast_query():
+    """
+    Direct fast query endpoint that bypasses ADK agent for faster responses.
+    Calls geminidataanalytics API directly and streams the response.
+    """
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+    
+    data = request.json
+    question = data.get('message')
+    session_id = data.get('session_id')
+    
+    if not question:
+        return jsonify({'error': 'No message provided'}), 400
+    
+    print(f"Fast Query: {question} (Session: {session_id})")
+    
+    # Save User Message
+    if session_id:
+        conversation_manager.save_message(session_id, 'user', question)
+
+    # Retrieve history
+    history = []
+    if session_id:
+        history = conversation_manager.get_conversation(session_id)
+        # We just added the user message, so we might want to exclude it to avoid duplication if we are re-appending it manually in agent.py
+        # But agent.py appends the *current* question manually. 
+        # Ideally, we pass history *excluding* the current question.
+        # fast_query in agent.py reconstructs messages. 
+        # It iterates history, then appends current question.
+        # If we save current question first, it's in history. 
+        # So we should exclude the last message from history passed to agent.
+        if history and history[-1]['content'] == question:
+             history = history[:-1]
+             
+        print(f"DEBUG: Fast Query Session ID: {session_id}, History Length: {len(history)}")
+    else:
+        print("DEBUG: Fast Query - No Session ID provided")
+    
+    def generate():
+        import time
+        start_time = time.time()
+        text_parts = []
+        data_result = None
+        full_response_text = ""
+        
+        # Track rich data for persistence
+        saved_table_data = None
+        saved_link = None
+        saved_chart_config = None
+        
+        try:
+            for chunk in agent.fast_query(question, history):
+                chunk_type = chunk.get("type")
+                content = chunk.get("content")
+                
+                if chunk_type == "text":
+                    text_parts.append(content)
+                    full_response_text += content + " "
+                    yield f"DATA: {content}\n"
+                elif chunk_type == "data":
+                    data_result = content
+                    # Emit structured data for frontend to render table
+                    # We still do some processing here to simplify frontend work
+                    rows = content.get("rows", [])
+                    schema = content.get("schema", {})
+                    fields = schema.get("fields", [])
+                    
+                    result_id = ""
+                    if rows and fields:
+                        # Prepare simplified structure for frontend
+                        table_data = {
+                            "fields": [{"name": f.get("name"), "label": f.get("display_name") or f.get("name", "").split(".")[-1]} for f in fields],
+                            "rows": rows
+                        }
+                        saved_table_data = table_data  # Track for saving
+                        yield f"DATA: {json.dumps({'type': 'json_table', 'data': table_data})}\n"
+                        
+                        # Serialize data limit for history context (so model knows what it showed)
+                        data_summary = "\n[Data Context Available]"
+                        full_response_text += data_summary
+
+                        explore_url = content.get("explore_url")
+                        if explore_url:
+                            saved_link = explore_url  # Track for saving
+                            yield f"DATA: {json.dumps({'type': 'json_link', 'url': explore_url})}\n"
+
+                        # Prepare full payload for history persistence (so follow-ups work)
+                        full_data_payload = {
+                            'result': {
+                                'data': rows,
+                                'schema': schema,
+                                'sql': content.get("sql", ""),
+                                'explore_url': explore_url or ""
+                            }
+                        }
+                        # Append a special marker line to the full_response_text
+                        # We ensure it's on a new line.
+                        full_response_text += f"\nDATA_PAYLOAD_JSON: {json.dumps(full_data_payload)}"
+
+                elif chunk_type == "chart":
+                     saved_chart_config = content  # Track for saving
+                     yield f"DATA: {json.dumps({'type': 'json_chart', 'config': content})}\n"
+                        
+                elif chunk_type == "error":
+                    yield f"DATA: Error: {content}\n"
+                elif chunk_type == "done":
+                    elapsed = time.time() - start_time
+                    yield f"THOUGHT: Query completed in {elapsed:.1f}s\n"
+            
+            # Save Agent Response to History with rich data
+            if session_id and full_response_text.strip():
+                extra_data = {}
+                if saved_table_data:
+                    extra_data['tableData'] = saved_table_data
+                if saved_link:
+                    extra_data['link'] = saved_link
+                if saved_chart_config:
+                    extra_data['chartConfig'] = saved_chart_config
+                conversation_manager.save_message(session_id, 'model', full_response_text, extra_data=extra_data if extra_data else None)
+
+        except Exception as e:
+            print(f"Fast Query Error: {e}")
+            import traceback
+            traceback.print_exc()
+            yield f"DATA: Error: {str(e)}\n"
+            # yield "DONE\n"
+    
+    return app.response_class(generate(), mimetype='text/plain')
+
+
 @app.route('/api/insights', methods=['POST'])
 def insights():
     """Direct API endpoint for the get_insights tool."""
@@ -223,6 +368,65 @@ def insights():
         return jsonify(result)
     except Exception as e:
         print(f"Insights Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+from conversation_manager import ConversationManager
+
+# Initialize Conversation Manager
+conversation_manager = ConversationManager()
+
+@app.route('/api/history', methods=['GET'])
+def list_history():
+    """Returns a list of recent conversations."""
+    limit = request.args.get('limit', 30, type=int)
+    history = conversation_manager.list_conversations(limit=limit)
+    return jsonify(history)
+
+@app.route('/api/history/<session_id>', methods=['GET'])
+def get_history(session_id):
+    """Returns the chat log for a specific session."""
+    messages = conversation_manager.get_conversation(session_id)
+    return jsonify(messages)
+
+@app.route('/api/history/<session_id>', methods=['DELETE'])
+def delete_history(session_id):
+    """Deletes a conversation."""
+    conversation_manager.delete_conversation(session_id)
+    return jsonify({'status': 'success'})
+
+@app.route('/api/dataset-config', methods=['GET'])
+def get_dataset_config():
+    """Returns the current dataset configuration (questions, dashboards, metadata)."""
+    try:
+        dataset_meta = agent.AGENT_CONFIG.get('_dataset', {})
+        
+        # Get dataset-specific config from the loaded YAML via AGENT_CONFIG
+        # We need to reload the dataset file to get non-instruction fields
+        import yaml
+        dataset_name = os.getenv("DATASET_NAME", "events")
+        dataset_path = f"datasets/{dataset_name}.yaml"
+        
+        dataset_config = {}
+        try:
+            with open(dataset_path, 'r') as f:
+                dataset_config = yaml.safe_load(f) or {}
+        except Exception as e:
+            print(f"Warning: Could not load dataset config for API: {e}")
+        
+        return jsonify({
+            'name': dataset_meta.get('name', dataset_name),
+            'display_name': dataset_meta.get('display_name', dataset_name),
+            'looker': {
+                'instance_uri': agent.LOOKER_INSTANCE_URI,
+                'model': agent.LOOKML_MODEL,
+                'explore': agent.EXPLORE
+            },
+            'starter_questions': dataset_config.get('starter_questions', []),
+            'test_scenarios': dataset_config.get('test_scenarios', []),
+            'dashboards': dataset_config.get('dashboards', [])
+        })
+    except Exception as e:
+        print(f"Dataset Config Error: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/auth/login_url', methods=['GET'])

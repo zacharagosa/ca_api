@@ -4,13 +4,57 @@ import time
 import yaml
 from dotenv import load_dotenv
 
-# Load agent configuration
-try:
-    with open('agent_config.yaml', 'r') as f:
-        AGENT_CONFIG = yaml.safe_load(f)
-except Exception as e:
-    print(f"WARNING: Failed to load agent_config.yaml: {e}")
-    AGENT_CONFIG = {}
+# Load and merge agent configuration from base + dataset-specific files
+def load_agent_config():
+    """
+    Loads base instructions and merges with dataset-specific instructions.
+    Dataset is determined by DATASET_NAME environment variable (default: events).
+    """
+    config = {}
+    
+    # Load base instructions
+    try:
+        with open('base_instructions.yaml', 'r') as f:
+            config = yaml.safe_load(f) or {}
+        print("INFO: Loaded base_instructions.yaml")
+    except Exception as e:
+        print(f"WARNING: Failed to load base_instructions.yaml: {e}")
+    
+    # Determine dataset and load dataset-specific config
+    dataset_name = os.getenv("DATASET_NAME", "events")
+    dataset_path = f"datasets/{dataset_name}.yaml"
+    
+    try:
+        with open(dataset_path, 'r') as f:
+            dataset_config = yaml.safe_load(f) or {}
+        print(f"INFO: Loaded dataset config: {dataset_path}")
+        
+        # Merge dataset-specific instructions into base config
+        # Single 'instructions' block gets appended to ALL agent types
+        dataset_instruction = dataset_config.get('instructions', '')
+        
+        if dataset_instruction:
+            for agent_key in ['get_insights', 'unified_agent', 'deep_analysis']:
+                if agent_key in config:
+                    # Find the instruction key (system_instruction or instruction)
+                    if 'system_instruction' in config[agent_key]:
+                        config[agent_key]['system_instruction'] += "\n\n" + dataset_instruction
+                    elif 'instruction' in config[agent_key]:
+                        config[agent_key]['instruction'] += "\n\n" + dataset_instruction
+                        
+        # Also expose dataset metadata
+        config['_dataset'] = {
+            'name': dataset_config.get('name', dataset_name),
+            'display_name': dataset_config.get('display_name', dataset_name),
+            'looker': dataset_config.get('looker', {})
+        }
+        
+    except Exception as e:
+        print(f"WARNING: Failed to load dataset config {dataset_path}: {e}")
+    
+    return config
+
+AGENT_CONFIG = load_agent_config()
 
 load_dotenv()
 import threading
@@ -18,6 +62,7 @@ from google.cloud import geminidataanalytics
 
 from google.adk.agents import Agent
 from google.adk.tools import agent_tool
+from google.adk.tools.mcp_tool import MCPToolset, StdioConnectionParams
 from google.auth import default
 from google.auth.transport.requests import Request as gRequest
 
@@ -53,16 +98,24 @@ import vertexai
 from vertexai.preview import reasoning_engines
 from vertexai.generative_models import GenerativeModel, Tool, FunctionDeclaration, Part, ToolConfig
 
-# Configuration - In a real app, use environment variables
-LOOKER_CLIENT_ID = os.getenv("LOOKER_CLIENT_ID")
-LOOKER_CLIENT_SECRET = os.getenv("LOOKER_CLIENT_SECRET")
-LOOKER_INSTANCE_URI = os.getenv("LOOKER_INSTANCE_URI")
-LOOKML_MODEL = os.getenv("LOOKML_MODEL", "gaming")
-EXPLORE = os.getenv("EXPLORE", "events")
+# Configuration - Load Looker config from dataset, with fallback to env vars
+dataset_looker = AGENT_CONFIG.get('_dataset', {}).get('looker', {})
+
+# Per-dataset Looker credentials - read env var names from dataset config
+_client_id_env = dataset_looker.get('client_id_env', 'LOOKER_CLIENT_ID')
+_client_secret_env = dataset_looker.get('client_secret_env', 'LOOKER_CLIENT_SECRET')
+
+LOOKER_CLIENT_ID = os.getenv(_client_id_env) or os.getenv("LOOKER_CLIENT_ID")
+LOOKER_CLIENT_SECRET = os.getenv(_client_secret_env) or os.getenv("LOOKER_CLIENT_SECRET")
+LOOKER_INSTANCE_URI = dataset_looker.get('instance_uri') or os.getenv("LOOKER_INSTANCE_URI")
+LOOKML_MODEL = dataset_looker.get('model') or os.getenv("LOOKML_MODEL", "gaming")
+EXPLORE = dataset_looker.get('explore') or os.getenv("EXPLORE", "events")
+
+print(f"INFO: Using Looker instance: {LOOKER_INSTANCE_URI}, model: {LOOKML_MODEL}, explore: {EXPLORE}")
 PROJECT_ID = os.getenv("PROJECT_ID", "1094200614711")
 if PROJECT_ID == "aragosalooker":
     PROJECT_ID = "1094200614711" # Force numeric ID if default/old string is found
-LOCATION = os.getenv("LOCATION", "us-central1")
+LOCATION = os.getenv("LOCATION", "global")
 vertexai.init(
     project=PROJECT_ID,
     location=LOCATION,
@@ -99,8 +152,240 @@ def get_access_token():
 
 
 
-# Global client to avoid re-init overhead
+# Global client and cached objects to avoid re-init overhead
 global_data_chat_client = None
+_cached_credentials = None
+_cached_datasource_refs = None
+
+def _get_cached_client():
+    """Returns cached DataChatServiceClient, creating if needed."""
+    global global_data_chat_client
+    if global_data_chat_client is None:
+        log_debug("Initializing Global DataChatServiceClient...")
+        global_data_chat_client = geminidataanalytics.DataChatServiceClient(
+            credentials=auth_manager.get_credentials()
+        )
+    return global_data_chat_client
+
+def _get_cached_datasource():
+    """Returns cached datasource references, creating if needed."""
+    global _cached_credentials, _cached_datasource_refs
+    
+    if _cached_datasource_refs is None:
+        _cached_credentials = geminidataanalytics.Credentials(
+            oauth=geminidataanalytics.OAuthCredentials(
+                secret=geminidataanalytics.OAuthCredentials.SecretBased(
+                    client_id=LOOKER_CLIENT_ID, client_secret=LOOKER_CLIENT_SECRET
+                ),
+            )
+        )
+        
+        looker_explore_reference = geminidataanalytics.LookerExploreReference(
+            looker_instance_uri=LOOKER_INSTANCE_URI, lookml_model=LOOKML_MODEL, explore=EXPLORE
+        )
+        
+        _cached_datasource_refs = geminidataanalytics.DatasourceReferences(
+            looker=geminidataanalytics.LookerExploreReferences(
+                explore_references=[looker_explore_reference],
+                credentials=_cached_credentials
+            ),
+        )
+    
+    return _cached_datasource_refs
+
+def fast_query(question: str, history: list = []):
+    """
+    Streamlined query function that bypasses ADK agent for fast responses.
+    Yields chunks as they arrive for SSE streaming.
+    
+    Args:
+        question: The question to ask
+        history: List of conversation messages
+        
+    Yields:
+        dict: Chunks with type (text, data, done) and content
+    """
+    client = _get_cached_client()
+    datasource_refs = _get_cached_datasource()
+    
+    # Updated system instruction to support explicit chart requests
+    system_instruction = "Answer directly with data. Be concise. If the user EXPLICITLY asks for a chart or visualization, prepend the exact string 'SHOW_CHART' to the text part of your response. CRITICAL: When using the `generate_chart` tool, you MUST call it with NO ARGUMENTS (e.g. `generate_chart()`). The tool automatically uses the active data context. If you provide ANY `data_source` argument (like a name or ID), the tool will FAIL."
+    
+    inline_context = geminidataanalytics.Context(
+        system_instruction=system_instruction,
+        datasource_references=datasource_refs,
+        options=geminidataanalytics.ConversationOptions(
+            analysis=geminidataanalytics.AnalysisOptions(
+                python=geminidataanalytics.AnalysisOptions.Python(enabled=False)
+            )
+        ),
+    )
+    
+    messages = []
+    
+    # Populate history
+    # Sort history by timestamp if needed, but assuming list is ordered
+    for msg in history:
+        role = msg.get('role')
+        content = msg.get('content')
+        if not content:
+            continue
+            
+        g_msg = geminidataanalytics.Message()
+        if role == 'user':
+            g_msg.user_message.text = content
+            messages.append(g_msg)
+        elif role == 'model' or role == 'agent':
+            if "DATA_PAYLOAD_JSON: " in content:
+                # This message contains a data payload we need to restore
+                try:
+                    parts = content.split("DATA_PAYLOAD_JSON: ")
+                    text_part = parts[0].strip()
+                    json_str = parts[1].strip()
+                    
+                    # 1. If there's significantly substantive text, add it as a separate text message first
+                    if text_part:
+                         text_msg = geminidataanalytics.Message()
+                         text_msg.system_message.text = {'parts': [text_part]}
+                         messages.append(text_msg)
+                    
+                    # 2. Add the Data Message
+                    # Robust cleanup: Ensure we only parse valid JSON if there is trailing garbage
+                    # Use a loop to try parsing if there are multiple lines? 
+                    # Usually json_str is the rest of the string.
+                    # If there are newlines within the JSON, standard load works.
+                    # The error "Extra data: line 2 column 1" implies there is *another* JSON object or text after the first one.
+                    # We will try to parse just the first valid object.
+                    try:
+                        data_payload = json.loads(json_str)
+                    except json.JSONDecodeError as ide:
+                        # Fallback: maybe there is extra content after the JSON?
+                        # This works if `json.loads` is strict. We can likely ignore the rest.
+                        decoder = json.JSONDecoder()
+                        data_payload, _ = decoder.raw_decode(json_str)
+                    
+                    # Fix for "Protocol message DataResult/DataMessage has no 'sql' field"
+                    # Structure: SystemMessage (DataMessage) -> result (DataResult) -> data, schema
+                    inner_payload = data_payload
+                    if 'result' in data_payload:
+                         inner_payload = data_payload['result']
+                    
+                    clean_inner_payload = {}
+                    if 'data' in inner_payload:
+                        clean_inner_payload['data'] = inner_payload['data']
+                    if 'schema' in inner_payload:
+                        clean_inner_payload['schema'] = inner_payload['schema']
+                    
+                    # Try giving it a name?
+                    # logic: generate_chart checks active context.
+                    clean_inner_payload['name'] = "previous_result" 
+
+                    data_msg = geminidataanalytics.Message()
+                    # The SDK expects DataMessage, which has a 'result' field (DataResult), which has 'data'
+                    data_msg.system_message.data = {'result': clean_inner_payload}
+                    messages.append(data_msg)
+                    
+                except Exception as e:
+                    print(f"Error parsing history data payload: {e}")
+                    # Fallback to plain text
+                    g_msg.system_message.text = {'parts': [content]} 
+                    messages.append(g_msg)
+            else:
+                # Standard text message
+                g_msg.system_message.text = {'parts': [content]} 
+                messages.append(g_msg)
+
+    # Append current message with dynamic hint for charts
+    final_question = question
+    lc_question = question.lower()
+    if any(k in lc_question for k in ["chart", "graph", "plot", "visualize"]):
+        final_question += " (IMPORTANT SYSTEM INSTRUCTION: Call `generate_chart()` with NO arguments. Do NOT provide a name. Do NOT provide an ID. Just `generate_chart()`.)"
+
+    current_msg = geminidataanalytics.Message()
+    current_msg.user_message.text = final_question
+    messages.append(current_msg)
+    
+    request = geminidataanalytics.ChatRequest(
+        inline_context=inline_context,
+        parent=f"projects/{PROJECT_ID}/locations/global",
+        messages=messages,
+    )
+    
+    
+    # Retry loop for handling "DataResult not found" errors caused by model hallucination
+    max_retries = 1
+    for attempt in range(max_retries + 1):
+        try:
+            stream = client.chat(request=request)
+            
+            for item in stream:
+                kind = item._pb.WhichOneof("kind")
+                
+                if kind == "system_message":
+                    message_dict = geminidataanalytics.SystemMessage.to_dict(item.system_message)
+                    
+                    if "text" in message_dict:
+                        # text is a dict with 'parts' array containing the actual text
+                        text_data = message_dict["text"]
+                        if isinstance(text_data, dict) and "parts" in text_data:
+                            text_content = " ".join(text_data["parts"])
+                        elif isinstance(text_data, str):
+                            text_content = text_data
+                        else:
+                            text_content = str(text_data)
+                        yield {"type": "text", "content": text_content}
+                    elif "data" in message_dict:
+                        data = message_dict["data"]
+                        result = data.get("result", {})
+                        
+                        # Fallback URL logic
+                        if 'explore_url' not in result:
+                            try:
+                                fields = [f['name'] for f in result.get('schema', {}).get('fields', []) if 'name' in f]
+                                if fields:
+                                    fields_str = ",".join(fields)
+                                    base_uri = LOOKER_INSTANCE_URI.rstrip('/')
+                                    # Simple fallback URL
+                                    result['explore_url'] = f"{base_uri}/explore/{LOOKML_MODEL}/{EXPLORE}?fields={fields_str}&toggle=dat,pik,vis"
+                            except Exception:
+                                pass
+
+                        yield {
+                            "type": "data",
+                            "content": {
+                                "rows": result.get("data", []),  # data is array of flat objects
+                                "schema": result.get("schema", {}),
+                                "sql": result.get("sql", ""),
+                                "explore_url": result.get("explore_url", ""),
+                            }
+                        }
+                    elif "chart" in message_dict:
+                         yield {"type": "chart", "content": message_dict["chart"]}
+            
+            yield {"type": "done", "content": None}
+            break # Success, exit retry loop
+            
+        except Exception as e:
+            error_str = str(e)
+            if "DataResult not found" in error_str and attempt < max_retries:
+                print(f"DEBUG: Caught DataResult error: {error_str}. Retrying with correction...")
+                
+                # Append a correction message to the history
+                correction_msg = geminidataanalytics.Message()
+                correction_msg.user_message.text = "SYSTEM ERROR: You called `generate_chart()` with an argument. This is FORBIDDEN. You MUST call it with NO arguments (e.g. `generate_chart()`) to use the current data context. Try again immediately with NO arguments."
+                messages.append(correction_msg)
+                
+                # Update request with new messages
+                request = geminidataanalytics.ChatRequest(
+                    inline_context=inline_context,
+                    parent=f"projects/{PROJECT_ID}/locations/global",
+                    messages=messages,
+                )
+                continue # Retry
+            else:
+                yield {"type": "error", "content": error_str}
+                break
+
 
 def get_insights(question: str):
 
@@ -370,7 +655,7 @@ def run_deep_analysis(question: str):
 
     # Initialize the model
     model = GenerativeModel(
-        "gemini-3-pro-preview",
+        "gemini-3-flash-preview",
         tools=[analysis_tools],
         tool_config=ToolConfig(
             function_calling_config=ToolConfig.FunctionCallingConfig(
@@ -378,7 +663,26 @@ def run_deep_analysis(question: str):
             )
         ),
         system_instruction=AGENT_CONFIG.get('deep_analysis', {}).get('system_instruction', """You are a Senior Data Analyst. The user has a complex request.
-        Your goal is to provide a comprehensive analysis by breaking down the problem, asking multiple questions to Looker AND the Knowledge Base, and synthesizing the results.""")
+        Your goal is to provide a comprehensive analysis by breaking down the problem, asking multiple questions to Looker AND the Knowledge Base, and synthesizing the results.
+
+        CRITICAL OUTPUT FORMATTING:
+        When presenting key metrics or comparisons, do NOT just write text. Use the special JSON block format below so the interface renders them as beautiful UI cards.
+
+        For Single Metrics:
+        ```json-metric
+        { "label": "Retention Rate", "value": "45%", "trend": "+5%", "description": "Day 1 Retention for iOS" }
+        ```
+
+        For Comparisons (Use multiple blocks or a list):
+        ```json-metric
+        [
+          { "label": "iOS Session", "value": "14m", "description": "Avg Duration" },
+          { "label": "Android Session", "value": "11m", "description": "Avg Duration" }
+        ]
+        ```
+
+        Always intersperse these blocks with your analysis text.
+        """)
     )
     
     chat = model.start_chat()
@@ -573,10 +877,65 @@ unified_agent = Agent(
     ],
 )
 
+# MCP Agent for Looker Toolbox (create dashboards, analyze LookML, etc.)
+mcp_agent = None
+mcp_app = None
+
+try:
+    mcp_toolset = MCPToolset(
+        connection_params=StdioConnectionParams(
+            command="./toolbox",
+            args=["--stdio", "--prebuilt", "looker"],
+            env={
+                "LOOKER_BASE_URL": LOOKER_INSTANCE_URI,
+                "LOOKER_CLIENT_ID": LOOKER_CLIENT_ID,
+                "LOOKER_CLIENT_SECRET": LOOKER_CLIENT_SECRET,
+                "LOOKER_VERIFY_SSL": "true",
+            }
+        )
+    )
+    
+    mcp_agent = Agent(
+        model="gemini-3-flash-preview",
+        name="LookerToolboxAgent",
+        instruction="""You are a Looker admin assistant with access to Looker Toolbox via MCP.
+        
+You have access to powerful tools to interact with Looker:
+
+**Model & Query Tools:**
+- get_models, get_explores, get_dimensions, get_measures
+- query (run queries), query_sql, query_url
+
+**Content Tools:**
+- make_dashboard (create dashboards), add_dashboard_element, add_dashboard_filter
+- make_look (create Looks), run_look, run_dashboard
+- get_dashboards, get_looks, generate_embed_url
+
+**LookML Authoring:**
+- get_projects, get_project_files, get_project_file
+- create_project_file, update_project_file, delete_project_file
+- dev_mode (activate dev mode)
+
+**Health Tools:**
+- health_pulse, health_analyze, health_vacuum
+
+When asked to create content, use the appropriate tools and return the URL.
+Always be helpful and explain what you're doing.""",
+        tools=[mcp_toolset],
+    )
+    
+    mcp_app = reasoning_engines.AdkApp(
+        agent=mcp_agent,
+        enable_tracing=False,
+    )
+    print("INFO: MCP Looker Toolbox agent initialized successfully")
+except Exception as e:
+    print(f"WARNING: Failed to initialize MCP Agent: {e}")
+
 # vertexai.init is moved to the entry point (chat.py or deploy.py)
 # to avoid hardcoding the staging bucket in the remote environment.
 
-# Create the App
+# Create the main App (unified agent)
 try:
     app = reasoning_engines.AdkApp(
         agent=unified_agent,
@@ -589,3 +948,10 @@ except Exception as e:
         def query(self, *args, **kwargs):
             return {"output": "Agent could not be initialized due to missing credentials."}
     app = DummyApp()
+
+# Export both apps for server.py to route between them
+def get_agent_app(agent_type="fast"):
+    """Returns the appropriate agent app based on type."""
+    if agent_type == "mcp" and mcp_app:
+        return mcp_app
+    return app
