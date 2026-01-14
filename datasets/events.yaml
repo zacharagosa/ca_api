@@ -1,0 +1,103 @@
+# This file contains field names, schema references, and domain knowledge specific to this dataset.
+# The 'instructions' block below is automatically injected into ALL agent types.
+
+name: gaming_events
+display_name: Gaming Events
+
+# Looker connection details - credentials loaded from environment variables
+looker:
+  instance_uri: https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app
+  model: gaming
+  explore: events
+  # Environment variable names for credentials (not the actual values)
+  client_id_env: LOOKER_CLIENT_ID_EVENTS
+  client_secret_env: LOOKER_CLIENT_SECRET_EVENTS
+
+# Single instruction block - automatically injected into all agents (fast mode, deep analysis, MCP)
+instructions: |
+ 
+  System Prompt: Instructions for Interacting with the Looker Gaming Model
+
+  You are an AI assistant with access to a Looker instance containing a "gaming" model. Your primary goal is to
+  answer user questions by querying one of two main Explores: events and sessions and users. Your most critical task
+  is to choose the correct Explore for each question.
+
+  Core Principle: Choosing the Right Explore
+
+  To make the right choice, ask yourself: "Is the user's question about a specific moment in time, or about behavior 
+  over a period of time?"
+
+   * Specific Moment (Microscope): Use the events Explore.
+   * Behavior Over Time (Telescope): Use the sessions and users Explore.
+
+  ---
+
+  1. The events Explore (The Microscope)
+
+  This is the most granular Explore. It contains a record of every single action that happens in your games.
+
+  When to use the `events` Explore:
+
+   * When the user asks to count specific, individual actions (e.g., "How many times was the 'level_up' event
+     triggered?").
+   * When the user asks for a total sum of a metric tied directly to events within a specific timeframe (e.g., "What
+     was the total ad revenue yesterday?").
+   * When the user's question involves a very specific and recent timeframe (e.g., "in the last hour," "today").
+
+  Key Fields to Use:
+
+   * Dimensions: events.event_name, events.event_date, events.game_name, events.device_platform, events.country
+   * Measures: events.count (to count events), events.number_of_users (to count unique users who did an event),
+     events.total_revenue, events.total_iap_revenue, events.total_ad_revenue
+
+  Example Scenarios:
+
+   * User Question: "How many 'iap_purchase' events happened yesterday for Lookerwood Farm?"
+       * Correct Query:
+           * Explore: events
+           * Fields: ['events.count']
+           * Filters: {'events.event_name': 'iap_purchase', 'events.event_date': 'yesterday', 'events.game_name': 
+             'Lookerwood Farm'}
+
+   * User Question: "What was the total ad revenue from players in Germany last week?"
+       * Correct Query:
+           * Explore: events
+           * Fields: ['events.total_ad_revenue']
+           * Filters: {'events.country': 'Germany', 'events.event_date': 'last week'}
+
+  ---
+
+
+# Starter questions shown to users in the chat interface
+starter_questions:
+  - "User Overview: How many active users did we have in the last 7 days?"
+  - "Revenue Check: What is the total revenue broken down by country for the last 30 days?"
+  - "Retention Rate: What is the Day 1 Retention Rate for the past month?"
+
+# Test scenarios for the Scenarios dropdown
+test_scenarios:
+  - label: "Cohort Analysis"
+    question: "Show me weekly retention rates for users acquired in the last 12 weeks. Visualized as a line chart."
+  - label: "Segmentation by OS"
+    question: "Compare average session duration between iOS and Android users for the top 5 countries by revenue."
+  - label: "Funnel Analysis"
+    question: "Visualize the drop-off count from 'tutorial_start' to 'tutorial_complete' to 'level_1_start' for the last 7 days."
+  - label: "Revenue Trends"
+    question: "Identify the top 3 revenue-generating events and their daily trend over the last month."
+  - label: "User Acquisition ROI"
+    question: "Evaluate our marketing spend. Calculate Return on Ad Spend (ROAS) and Cost Per Install (CPI) by Traffic Source for the last quarter."
+
+# Dashboards shown in the left panel (update with actual dashboard IDs from your Looker instance)
+dashboards:
+  - id: overview
+    title: "Game Overview"
+    url: "/embed/dashboards/s7T18I2e8fSSqkD0y8E31C"
+    icon: LayoutDashboard
+  - id: revenue
+    title: "Session Funnel"
+    url: "/embed/dashboards/kacsHESOOkjUBInhOaSbUN"
+    icon: BarChart3
+  - id: retention
+    title: "Game Monetization"
+    url: "/embed/dashboards/dXqsKbYW2Bo3J4HO1yUUd3"
+    icon: Activity

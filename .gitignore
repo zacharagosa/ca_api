@@ -9,3 +9,10 @@ inspect_lib_2.py
 
 node_modules/
 frontend/node_modules/
+
+# Conversations folder - track structure but not content
+conversations/*
+!conversations/.gitkeep
+
+# Datasets - only include events.yaml
+datasets/ghost_story.yaml
