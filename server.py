@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, Response, stream_with_context
+from flask import Flask, request, jsonify, Response, stream_with_context, redirect
 import json
 import time
 import os
@@ -541,6 +541,64 @@ def get_embed_url():
     except Exception as e:
         print(f"Embed Gen Error: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/looker-provision', methods=['GET'])
+def looker_provision():
+    """
+    Auto-provision a user in Looker by redirecting them through SSO.
+    
+    This endpoint:
+    1. Generates a signed SSO embed URL for the user
+    2. Redirects user to Looker (which auto-provisions them)
+    3. The embedded page then redirects back to the app
+    
+    Query params:
+    - user_id: The user's email or unique identifier (required)
+    - return_url: URL to return to after provisioning (optional, defaults to app root)
+    """
+    user_id = request.args.get('user_id')
+    return_url = request.args.get('return_url', '/')
+    
+    if not user_id:
+        return jsonify({'error': 'user_id is required'}), 400
+    
+    if not embed_manager:
+        # If embed manager isn't available, just redirect back
+        print("WARNING: Looker Embed Manager not available, skipping provisioning")
+        return redirect(return_url)
+    
+    try:
+        from flask import redirect
+        
+        # Generate SSO URL pointing to a minimal Looker page
+        # We use a blank embed or the home page - this just triggers provisioning
+        base_uri = agent.LOOKER_INSTANCE_URI.rstrip('/')
+        
+        # Point to a simple page - the explore/browse page is lightweight
+        # After loading, we redirect back to our app
+        target_url = f"{base_uri}/browse"
+        
+        # Generate signed URL
+        signed_url = embed_manager.generate_signed_url(
+            target_url=target_url,
+            user_id=user_id,
+            first_name=user_id.split('@')[0] if '@' in user_id else user_id,
+            last_name="(Auto)"
+        )
+        
+        # Redirect user to Looker (this provisions them)
+        # We can't easily redirect them BACK from Looker embed, so we use a different approach:
+        # Return the signed URL and let the frontend handle the flow
+        return jsonify({
+            'looker_url': signed_url,
+            'return_url': return_url
+        })
+        
+    except Exception as e:
+        print(f"Looker Provision Error: {e}")
+        # Don't fail hard - just return error and let frontend handle
+        return jsonify({'error': str(e), 'return_url': return_url}), 500
 
 
 

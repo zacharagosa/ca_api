@@ -775,13 +775,61 @@ function App() {
 
 
   const login = useGoogleLogin({
-    onSuccess: tokenResponse => {
+    onSuccess: async (tokenResponse) => {
       console.log(tokenResponse);
       setAccessToken(tokenResponse.access_token);
       localStorage.setItem('looker_access_token', tokenResponse.access_token);
+
+      // Trigger Looker SSO provisioning in the background
+      // This auto-provisions the user in Looker so they can access embedded content
+      try {
+        // Get user info from Google to use as Looker user_id
+        const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${tokenResponse.access_token}` }
+        });
+
+        if (userInfoResponse.ok) {
+          const userInfo = await userInfoResponse.json();
+          const userEmail = userInfo.email;
+
+          if (userEmail) {
+            console.log('Provisioning Looker user:', userEmail);
+
+            // Call our backend to get the Looker SSO URL
+            const provisionResponse = await fetch(
+              `${API_BASE_URL}/api/looker-provision?user_id=${encodeURIComponent(userEmail)}`
+            );
+
+            if (provisionResponse.ok) {
+              const { looker_url } = await provisionResponse.json();
+
+              if (looker_url) {
+                // Open Looker SSO in a hidden iframe to trigger provisioning
+                // This happens silently without redirecting the user
+                const iframe = document.createElement('iframe');
+                iframe.style.display = 'none';
+                iframe.src = looker_url;
+                document.body.appendChild(iframe);
+
+                // Remove iframe after 5 seconds (provisioning should complete by then)
+                setTimeout(() => {
+                  if (iframe.parentNode) {
+                    iframe.parentNode.removeChild(iframe);
+                  }
+                }, 5000);
+
+                console.log('Looker provisioning triggered via hidden iframe');
+              }
+            }
+          }
+        }
+      } catch (e) {
+        // Don't fail login if Looker provisioning fails
+        console.warn('Looker provisioning failed (non-blocking):', e);
+      }
     },
     onError: error => console.log('Login Failed:', error),
-    scope: 'https://www.googleapis.com/auth/cloud-platform'
+    scope: 'https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email'
   });
 
   // Ref for AbortController
