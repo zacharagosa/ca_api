@@ -939,47 +939,9 @@ function App() {
       setAccessToken(tokenResponse.access_token);
       localStorage.setItem('looker_access_token', tokenResponse.access_token);
 
-      // Auto-provision user in Looker using cookieless embed
-      // This creates an embed user without requiring an internal Looker license
-      try {
-        // Get user info from Google
-        const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-          headers: { Authorization: `Bearer ${tokenResponse.access_token}` }
-        });
-
-        if (userInfoResponse.ok) {
-          const userInfo = await userInfoResponse.json();
-          const userEmail = userInfo.email;
-
-          if (userEmail) {
-            console.log('Provisioning Looker embed user:', userEmail);
-
-            // Provision user via cookieless embed API
-            const provisionResponse = await fetch(
-              `${API_BASE_URL}/api/looker-provision?user_id=${encodeURIComponent(userEmail)}`
-            );
-
-            if (provisionResponse.ok) {
-              const result = await provisionResponse.json();
-              if (result.provisioned) {
-                console.log('Looker embed user provisioned successfully');
-                // Store embed session tokens for later use
-                localStorage.setItem('looker_embed_session', JSON.stringify({
-                  user_id: userEmail,
-                  session_reference_token: result.session_reference_token,
-                  authentication_token: result.authentication_token,
-                  navigation_token: result.navigation_token
-                }));
-              }
-            } else {
-              console.warn('Looker provisioning response not ok:', provisionResponse.status);
-            }
-          }
-        }
-      } catch (e) {
-        // Don't fail login if Looker provisioning fails
-        console.warn('Looker provisioning failed (non-blocking):', e);
-      }
+      // Note: We no longer manually provision the embed user here.
+      // The embed session is acquired on-demand in the dashboard component
+      // using the 'embed_' prefixed user identity.
     },
     onError: error => console.log('Login Failed:', error),
     scope: 'https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email'

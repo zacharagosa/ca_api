@@ -103,7 +103,8 @@ class LookerEmbedManager:
                     "see_lookml_dashboards",
                     "explore"
                 ],
-                "models": [self.lookml_model],
+                # Grant access to all potential models to avoid 403 errors if dataset config varies
+                "models": list(set([self.lookml_model, "gaming", "snowplow"])),
                 "group_ids": [],
                 "user_attributes": {"locale": "en_US"}
             }
