@@ -770,11 +770,13 @@ function App() {
 
         const requestPayload = {
           target_url: dashboard.url,
-          user_id: userEmail || 'embed_user',
+          // Use 'embed_' prefix to ensure we create a distinct embed user
+          // and avoid conflicts if the email matches an existing native Looker user.
+          user_id: userEmail ? `embed_${userEmail}` : 'embed_guest_user',
           first_name: userEmail ? userEmail.split('@')[0] : 'Guest',
           last_name: 'User'
         };
-        console.log('Fetching cookieless embed session for:', dashboard.url, 'user:', userEmail);
+        console.log('Fetching cookieless embed session for:', dashboard.url, 'user:', requestPayload.user_id);
 
         const response = await fetch(`${API_BASE_URL}/api/embed`, {
           method: 'POST',
