@@ -873,15 +873,26 @@ function App() {
           const targetUrl = new URL(embedSession.target_url);
           const dashboardPath = targetUrl.pathname;
 
+          // Parse query params to pass to SDK
+          // The SDK requires params to be passed via .withParams()
+          const searchParams = new URLSearchParams(targetUrl.search);
+          const params = {};
+          for (const [key, value] of searchParams) {
+            params[key] = value;
+          }
+
           // Check if it's a dashboard ID or slug
-          const dashboardMatch = dashboardPath.match(/\/embed\/dashboards\/(.+)/);
+          // Matches /embed/dashboards/123 or /dashboards/123
+          const dashboardMatch = dashboardPath.match(/\/(?:embed\/)?dashboards\/([^/]+)/);
+
           if (dashboardMatch) {
             const dashboardId = dashboardMatch[1];
-            console.log('Creating embed for dashboard:', dashboardId);
+            console.log('Creating embed for dashboard:', dashboardId, 'with params:', params);
 
             LookerEmbedSDK.createDashboardWithId(dashboardId)
               .appendTo(embedContainerRef.current)
               .withClassName('looker-embed-dashboard')
+              .withParams(params)
               .build()
               .connect()
               .then((dashboard) => {
@@ -891,6 +902,8 @@ function App() {
                 console.error('Dashboard embed error:', error);
                 setEmbedError('Failed to load dashboard: ' + error.message);
               });
+          } else {
+            console.error('Could not extract dashboard ID from path:', dashboardPath);
           }
         } catch (e) {
           console.error('Error creating dashboard embed:', e);
