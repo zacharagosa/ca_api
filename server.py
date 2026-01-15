@@ -501,42 +501,76 @@ except Exception as e:
 
 @app.route('/api/embed', methods=['POST'])
 def get_embed_url():
-    """Generates a signed Looker embed URL using the Looker SDK."""
+    """
+    Generates a Looker embed URL using cookieless embed session.
+    
+    For cookieless embed, we acquire a session and return tokens that
+    the frontend will use with the Looker Embed SDK.
+    """
     if not embed_manager:
         return jsonify({'error': 'Embed Manager not initialized'}), 500
         
     try:
         data = request.json
-        # Target URL from frontend is likely relative "/embed/...", but SDK might want full or specific format
-        # SDK `create_sso_embed_url` often expects the full URL including protocol/host if strictly validation
-        # OR just the path. Let's try passing what we receive. 
-        # Actually, standard is usually the full URL *except* the /login/embed/ part? 
-        # Wait, `target_url` for `create_sso_embed_url` should be the destination URL.
-        # e.g. https://<instance>/embed/dashboards/1
-        
         target_path = data.get('target_url')
         if not target_path:
             return jsonify({'error': 'Target URL is required'}), 400
 
-        # Ensure we construct the full target URL if we only got a path
+        user_id = data.get('user_id', 'embed_user')
+        first_name = data.get('first_name', 'Guest')
+        last_name = data.get('last_name', 'User')
+        session_reference_token = data.get('session_reference_token')
+        
+        # Get embed domain from request origin
+        embed_domain = request.headers.get('Origin') or request.headers.get('Referer')
+        if embed_domain:
+            from urllib.parse import urlparse
+            parsed = urlparse(embed_domain)
+            embed_domain = f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else None
+
+        # Ensure we construct the full target URL
         if not target_path.startswith('http'):
-             # Looker Instance URI usually has no trailing slash, target_path starts with /
-             # But let's be careful.
-             base = agent.LOOKER_INSTANCE_URI.rstrip('/')
-             if not target_path.startswith('/'):
-                 target_path = '/' + target_path
-             full_target_url = f"{base}{target_path}"
+            base = agent.LOOKER_INSTANCE_URI.rstrip('/')
+            if not target_path.startswith('/'):
+                target_path = '/' + target_path
+            full_target_url = f"{base}{target_path}"
         else:
             full_target_url = target_path
 
-        user_id = data.get('user_id', 'external_user_123')
-        
-        signed_url = embed_manager.generate_signed_url(
-            target_url=full_target_url,
-            user_id=user_id
-        )
-        
-        return jsonify({'url': signed_url})
+        # Try cookieless embed first, fall back to signed URL
+        try:
+            session_result = embed_manager.acquire_cookieless_session(
+                user_id=user_id,
+                first_name=first_name,
+                last_name=last_name,
+                session_reference_token=session_reference_token,
+                embed_domain=embed_domain
+            )
+            
+            # Return both the target URL and session tokens
+            # Frontend will use these with Looker Embed SDK
+            return jsonify({
+                'type': 'cookieless',
+                'target_url': full_target_url,
+                'looker_host': agent.LOOKER_INSTANCE_URI,
+                **session_result
+            })
+            
+        except Exception as cookieless_error:
+            print(f"Cookieless embed failed, trying signed URL: {cookieless_error}")
+            
+            # Fallback to signed URL (legacy method)
+            signed_url = embed_manager.generate_signed_url(
+                target_url=full_target_url,
+                user_id=user_id,
+                first_name=first_name,
+                last_name=last_name
+            )
+            
+            return jsonify({
+                'type': 'signed',
+                'url': signed_url
+            })
 
     except Exception as e:
         print(f"Embed Gen Error: {e}")

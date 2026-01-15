@@ -739,30 +739,67 @@ function App() {
 
       try {
         setEmbedError(null);
-        // Don't clear URL immediately to avoid flash if possible, but for security/logic:
         setSignedUrl(null);
 
-        const requestPayload = { target_url: dashboard.url };
-        console.log('Fetching signed embed URL for:', dashboard.url);
+        // Get user email from stored session or fetch from Google
+        let userEmail = null;
+        const storedSession = localStorage.getItem('looker_embed_session');
+        if (storedSession) {
+          try {
+            const session = JSON.parse(storedSession);
+            userEmail = session.user_id;
+          } catch (e) { }
+        }
+
+        // If no stored email, try to get from Google
+        if (!userEmail && accessToken) {
+          try {
+            const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+              headers: { Authorization: `Bearer ${accessToken}` }
+            });
+            if (userInfoResponse.ok) {
+              const userInfo = await userInfoResponse.json();
+              userEmail = userInfo.email;
+            }
+          } catch (e) { }
+        }
+
+        const requestPayload = {
+          target_url: dashboard.url,
+          user_id: userEmail || 'embed_user',
+          first_name: userEmail ? userEmail.split('@')[0] : 'Guest',
+          last_name: 'User'
+        };
+        console.log('Fetching embed URL for:', dashboard.url, 'user:', userEmail);
 
         const response = await fetch(`${API_BASE_URL}/api/embed`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            // We don't necessarily strictly need auth for this particular demo endpoint, 
-            // but good practice to pass if we had middleware.
-            // For now server.py assumes it's open or internal. 
           },
           body: JSON.stringify(requestPayload)
         });
 
         if (!response.ok) {
           const err = await response.json();
-          throw new Error(err.error || 'Failed to sign embed URL');
+          throw new Error(err.error || 'Failed to get embed URL');
         }
 
         const data = await response.json();
-        setSignedUrl(data.url);
+
+        // Handle both cookieless and signed URL responses
+        if (data.type === 'cookieless') {
+          // For cookieless, we need to construct the embed URL with authentication token
+          // The URL format is: https://instance/login/embed/<auth_token>?embed_path=<target_path>
+          const targetPath = new URL(data.target_url).pathname;
+          const embedUrl = `${data.looker_host}/login/embed/${encodeURIComponent(data.authentication_token)}?embed_path=${encodeURIComponent(targetPath)}`;
+          setSignedUrl(embedUrl);
+          console.log('Using cookieless embed URL');
+        } else if (data.url) {
+          // Legacy signed URL
+          setSignedUrl(data.url);
+          console.log('Using signed embed URL');
+        }
 
       } catch (e) {
         console.error("Embed Error:", e);
@@ -771,7 +808,7 @@ function App() {
     };
 
     fetchSignedUrl();
-  }, [activeDashboard, accessToken, datasetConfig.dashboards]); // Also depend on dashboard config loading
+  }, [activeDashboard, accessToken, datasetConfig.dashboards]);
 
 
   const login = useGoogleLogin({
