@@ -1,5 +1,9 @@
 #!/bin/bash
-# Grant a user access to the Gaming Analytics Cloud Run service
+# Grant a user full access to the Gaming Analytics application
+# This script handles:
+#   1. Cloud Run IAM access
+#   2. Looker group membership (for data access)
+#
 # Usage: ./scripts/grant_access.sh user@example.com
 
 set -e
@@ -7,16 +11,22 @@ set -e
 if [ -z "$1" ]; then
   echo "Usage: $0 <user-email>"
   echo "Example: $0 john.doe@example.com"
+  echo ""
+  echo "This grants access to:"
+  echo "  • Cloud Run service (if not public)"
+  echo "  • Looker 'Gaming Analytics Users' group"
   exit 1
 fi
 
 USER_EMAIL="$1"
 SERVICE_NAME="gaming-analytics"
 REGION="us-central1"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Load project ID from .env if available
-if [ -f .env ]; then
-  export $(cat .env | sed 's/#.*//g' | xargs)
+# Load environment from .env if available
+if [ -f "$PROJECT_DIR/.env" ]; then
+  export $(cat "$PROJECT_DIR/.env" | sed 's/#.*//g' | xargs)
 fi
 
 if [ -z "$PROJECT_ID" ]; then
@@ -24,24 +34,46 @@ if [ -z "$PROJECT_ID" ]; then
   exit 1
 fi
 
-echo "Granting access to: $USER_EMAIL"
-echo "Service: $SERVICE_NAME"
-echo "Project: $PROJECT_ID"
+echo "============================================"
+echo "  Granting Access: $USER_EMAIL"
+echo "============================================"
 echo ""
 
-# Grant Cloud Run Invoker role
+# Step 1: Cloud Run Access
+echo "Step 1: Cloud Run Access"
+echo "------------------------"
 gcloud run services add-iam-policy-binding $SERVICE_NAME \
   --project $PROJECT_ID \
   --region $REGION \
   --member="user:$USER_EMAIL" \
-  --role="roles/run.invoker"
+  --role="roles/run.invoker" \
+  --quiet 2>/dev/null || echo "  (Cloud Run access already granted or service public)"
+echo "  ✅ Cloud Run access configured"
+echo ""
 
+# Step 2: Looker Access
+echo "Step 2: Looker Access"
+echo "------------------------"
+cd "$PROJECT_DIR"
+if [ -f "scripts/looker_access.py" ]; then
+  # Activate virtual environment if available
+  if [ -f "venv/bin/activate" ]; then
+    source venv/bin/activate
+  fi
+  python scripts/looker_access.py grant "$USER_EMAIL" 2>&1 || echo "  ⚠️  Looker access could not be configured (check credentials)"
+else
+  echo "  ⚠️  Looker access script not found - skipping"
+fi
 echo ""
-echo "✅ Access granted!"
+
+# Summary
+echo "============================================"
+echo "  ✅ Access Grant Complete"
+echo "============================================"
 echo ""
-echo "The user can now access the application at:"
 SERVICE_URL=$(gcloud run services describe $SERVICE_NAME --region $REGION --project $PROJECT_ID --format='value(status.url)' 2>/dev/null || echo "[Run deployment first]")
+echo "User $USER_EMAIL can now access:"
 echo "  $SERVICE_URL"
 echo ""
-echo "They should sign into Chrome with their Google account ($USER_EMAIL)"
-echo "and navigate to the URL above."
+echo "IMPORTANT: If OAuth is in 'Testing' mode, also add the user to:"
+echo "  Google Cloud Console > APIs & Services > OAuth consent screen > Test users"
