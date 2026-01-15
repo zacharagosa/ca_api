@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm'
 import JSON5 from 'json5'
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, ArcElement, Filler } from 'chart.js';
 import { Bar, Line, Pie, Scatter } from 'react-chartjs-2';
+import { LookerEmbedSDK } from '@looker/embed-sdk';
 
 // UI Components
 import { Button } from "@/components/ui/button"
@@ -659,9 +660,11 @@ function App() {
   const [sidebarWidth, setSidebarWidth] = useState(600);
   const [isResizing, setIsResizing] = useState(false);
 
-  // LOOKER SIGNED URL STATE
+  // LOOKER EMBED STATE
   const [signedUrl, setSignedUrl] = useState(null);
+  const [embedSession, setEmbedSession] = useState(null);
   const [embedError, setEmbedError] = useState(null);
+  const embedContainerRef = useRef(null);
   const sidebarRef = useRef(null);
 
   // Ref to track resize state in event listeners without dependency issues
@@ -729,9 +732,9 @@ function App() {
     return () => clearTimeout(timer);
   }, [isLoading]);
 
-  // Fetch Signed URL when dashboard or token changes
+  // Fetch Embed Session when dashboard or token changes
   useEffect(() => {
-    const fetchSignedUrl = async () => {
+    const fetchEmbedSession = async () => {
       if (!activeDashboard || !accessToken) return;
 
       const dashboard = datasetConfig.dashboards.find(d => d.id === activeDashboard);
@@ -740,6 +743,7 @@ function App() {
       try {
         setEmbedError(null);
         setSignedUrl(null);
+        setEmbedSession(null);
 
         // Get user email from stored session or fetch from Google
         let userEmail = null;
@@ -770,7 +774,7 @@ function App() {
           first_name: userEmail ? userEmail.split('@')[0] : 'Guest',
           last_name: 'User'
         };
-        console.log('Fetching SSO embed URL for:', dashboard.url, 'user:', userEmail);
+        console.log('Fetching cookieless embed session for:', dashboard.url, 'user:', userEmail);
 
         const response = await fetch(`${API_BASE_URL}/api/embed`, {
           method: 'POST',
@@ -782,16 +786,90 @@ function App() {
 
         if (!response.ok) {
           const err = await response.json();
-          throw new Error(err.error || 'Failed to get embed URL');
+          throw new Error(err.error || 'Failed to get embed session');
         }
 
         const data = await response.json();
 
-        if (data.url) {
+        if (data.type === 'cookieless' && data.authentication_token) {
+          console.log('Received cookieless embed session');
+          setEmbedSession(data);
+
+          // Initialize the Looker Embed SDK with cookieless auth
+          const lookerHost = data.looker_host.replace(/^https?:\/\//, '');
+
+          LookerEmbedSDK.initCookieless(
+            lookerHost,
+            // acquireSession callback - called when SDK needs a new session
+            async () => {
+              console.log('SDK requesting new session');
+              const resp = await fetch(`${API_BASE_URL}/api/embed`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestPayload)
+              });
+              const newSession = await resp.json();
+              return {
+                authentication_token: newSession.authentication_token,
+                authentication_token_ttl: newSession.authentication_token_ttl,
+                navigation_token: newSession.navigation_token,
+                navigation_token_ttl: newSession.navigation_token_ttl,
+                session_reference_token_ttl: newSession.session_reference_token_ttl,
+                api_token: newSession.api_token,
+                api_token_ttl: newSession.api_token_ttl,
+              };
+            },
+            // generateTokens callback - called when SDK needs to refresh tokens
+            async (tokens) => {
+              console.log('SDK requesting token refresh');
+              const resp = await fetch(`${API_BASE_URL}/api/generate-embed-tokens`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  session_reference_token: tokens.session_reference_token,
+                  api_token: tokens.api_token,
+                  navigation_token: tokens.navigation_token,
+                })
+              });
+              return await resp.json();
+            }
+          );
+
+          // Now create the embed using the SDK
+          if (embedContainerRef.current) {
+            // Clear any existing content
+            embedContainerRef.current.innerHTML = '';
+
+            // Extract the dashboard path from the target URL
+            const targetUrl = new URL(data.target_url);
+            const dashboardPath = targetUrl.pathname;
+
+            // Check if it's a dashboard ID or slug
+            const dashboardMatch = dashboardPath.match(/\/embed\/dashboards\/(.+)/);
+            if (dashboardMatch) {
+              const dashboardId = dashboardMatch[1];
+              console.log('Creating embed for dashboard:', dashboardId);
+
+              LookerEmbedSDK.createDashboardWithId(dashboardId)
+                .appendTo(embedContainerRef.current)
+                .withClassName('looker-embed-dashboard')
+                .build()
+                .connect()
+                .then((dashboard) => {
+                  console.log('Dashboard embed connected successfully');
+                })
+                .catch((error) => {
+                  console.error('Dashboard embed error:', error);
+                  setEmbedError('Failed to load dashboard: ' + error.message);
+                });
+            }
+          }
+        } else if (data.url) {
+          // Fallback to signed URL
           setSignedUrl(data.url);
           console.log('Using signed SSO embed URL');
         } else {
-          throw new Error('No embed URL returned');
+          throw new Error('No embed session or URL returned');
         }
 
       } catch (e) {
@@ -800,7 +878,7 @@ function App() {
       }
     };
 
-    fetchSignedUrl();
+    fetchEmbedSession();
   }, [activeDashboard, accessToken, datasetConfig.dashboards]);
 
 
@@ -1552,6 +1630,12 @@ function App() {
                     src={signedUrl}
                     style={{ width: '100%', height: '100%', border: 'none' }}
                     title="Looker Dashboard"
+                  />
+                ) : embedSession ? (
+                  <div
+                    ref={embedContainerRef}
+                    style={{ width: '100%', height: '100%' }}
+                    className="looker-embed-container"
                   />
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#666' }}>

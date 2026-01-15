@@ -502,10 +502,10 @@ except Exception as e:
 @app.route('/api/embed', methods=['POST'])
 def get_embed_url():
     """
-    Generates a signed Looker SSO embed URL.
+    Generates a cookieless embed session for Looker dashboards.
     
-    This uses Looker's SSO embed which creates a fully signed URL that
-    authenticates the user automatically - no additional login required.
+    This returns tokens that the frontend uses with the Looker Embed SDK
+    to create the embedded iframe with proper authentication.
     """
     if not embed_manager:
         return jsonify({'error': 'Embed Manager not initialized'}), 500
@@ -529,25 +529,41 @@ def get_embed_url():
         else:
             full_target_url = target_path
 
-        print(f"Generating SSO embed URL for: {full_target_url}, user: {user_id}")
-        
-        # Generate signed SSO embed URL - this provides seamless auth
-        signed_url = embed_manager.generate_signed_url(
-            target_url=full_target_url,
+        print(f"=== Acquiring Cookieless Embed Session ===")
+        print(f"  Target URL: {full_target_url}")
+        print(f"  User ID: {user_id}")
+        print(f"  Name: {first_name} {last_name}")
+
+        # Get embed domain from request origin for dynamic registration
+        embed_domain = request.headers.get('Origin') or request.headers.get('Referer')
+        if embed_domain:
+            from urllib.parse import urlparse
+            parsed = urlparse(embed_domain)
+            embed_domain = f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else None
+            print(f"  Embed Domain: {embed_domain}")
+
+        # Acquire cookieless embed session
+        session_result = embed_manager.acquire_cookieless_session(
             user_id=user_id,
             first_name=first_name,
-            last_name=last_name
+            last_name=last_name,
+            session_reference_token=data.get('session_reference_token'),
+            embed_domain=embed_domain
         )
         
-        print(f"Generated signed URL: {signed_url[:100]}...")
+        print(f"  ✅ Session acquired successfully")
+        print(f"  Auth Token TTL: {session_result.get('authentication_token_ttl')}s")
         
+        # Return session tokens and target URL for the frontend
         return jsonify({
-            'url': signed_url,
-            'type': 'signed'
+            'type': 'cookieless',
+            'target_url': full_target_url,
+            'looker_host': agent.LOOKER_INSTANCE_URI,
+            **session_result
         })
 
     except Exception as e:
-        print(f"Embed Gen Error: {e}")
+        print(f"  ❌ Embed Error: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500

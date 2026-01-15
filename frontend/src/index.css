@@ -108,4 +108,17 @@
     padding: 0 !important;
     margin: 0 !important;
   }
+
+  /* Looker Embed Container */
+  .looker-embed-container {
+    width: 100%;
+    height: 100%;
+  }
+
+  .looker-embed-container iframe,
+  .looker-embed-dashboard {
+    width: 100%;
+    height: 100%;
+    border: none;
+  }
 }
