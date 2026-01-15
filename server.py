@@ -543,62 +543,131 @@ def get_embed_url():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/acquire-embed-session', methods=['POST'])
+def acquire_embed_session():
+    """
+    Acquire a cookieless embed session for the current user.
+    
+    Creates an embed user on-the-fly and returns tokens for initializing
+    the Looker embed iframe. No internal Looker license required.
+    
+    Body params:
+    - user_id: Unique identifier for the embed user (e.g., email)
+    - first_name: User's first name
+    - last_name: User's last name
+    - session_reference_token: Optional existing session token to rejoin
+    """
+    if not embed_manager:
+        return jsonify({'error': 'Looker Embed Manager not available'}), 500
+    
+    try:
+        data = request.json or {}
+        user_id = data.get('user_id')
+        
+        if not user_id:
+            return jsonify({'error': 'user_id is required'}), 400
+        
+        first_name = data.get('first_name', user_id.split('@')[0] if '@' in user_id else 'Guest')
+        last_name = data.get('last_name', 'User')
+        session_reference_token = data.get('session_reference_token')
+        
+        # Get embed domain from request origin for dynamic registration
+        embed_domain = request.headers.get('Origin') or request.headers.get('Referer')
+        if embed_domain:
+            # Extract just the domain part
+            from urllib.parse import urlparse
+            parsed = urlparse(embed_domain)
+            embed_domain = f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else None
+        
+        result = embed_manager.acquire_cookieless_session(
+            user_id=user_id,
+            first_name=first_name,
+            last_name=last_name,
+            session_reference_token=session_reference_token,
+            embed_domain=embed_domain
+        )
+        
+        # Don't return session_reference_token to client (keep it server-side for security)
+        # But for simplicity in this implementation, we return it for the client to manage
+        return jsonify(result)
+        
+    except Exception as e:
+        print(f"Acquire Embed Session Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/generate-embed-tokens', methods=['POST'])
+def generate_embed_tokens():
+    """
+    Generate new tokens for an existing cookieless embed session.
+    
+    Called periodically by the embed SDK/iframe to refresh tokens.
+    
+    Body params:
+    - session_reference_token: The session reference token
+    - api_token: Current API token
+    - navigation_token: Current navigation token
+    """
+    if not embed_manager:
+        return jsonify({'error': 'Looker Embed Manager not available'}), 500
+    
+    try:
+        data = request.json or {}
+        session_reference_token = data.get('session_reference_token')
+        api_token = data.get('api_token')
+        navigation_token = data.get('navigation_token')
+        
+        if not session_reference_token:
+            return jsonify({'session_reference_token_ttl': 0})
+        
+        result = embed_manager.generate_embed_tokens(
+            session_reference_token=session_reference_token,
+            api_token=api_token,
+            navigation_token=navigation_token
+        )
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        print(f"Generate Embed Tokens Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/looker-provision', methods=['GET'])
 def looker_provision():
     """
-    Auto-provision a user in Looker by redirecting them through SSO.
+    Auto-provision a user in Looker by creating an embed session.
     
-    This endpoint:
-    1. Generates a signed SSO embed URL for the user
-    2. Redirects user to Looker (which auto-provisions them)
-    3. The embedded page then redirects back to the app
-    
-    Query params:
-    - user_id: The user's email or unique identifier (required)
-    - return_url: URL to return to after provisioning (optional, defaults to app root)
+    Uses cookieless embed to create the user without requiring internal license.
+    Returns session tokens that can be used for embedding.
     """
     user_id = request.args.get('user_id')
-    return_url = request.args.get('return_url', '/')
     
     if not user_id:
         return jsonify({'error': 'user_id is required'}), 400
     
     if not embed_manager:
-        # If embed manager isn't available, just redirect back
-        print("WARNING: Looker Embed Manager not available, skipping provisioning")
-        return redirect(return_url)
+        return jsonify({'error': 'Looker Embed Manager not available', 'provisioned': False}), 500
     
     try:
-        from flask import redirect
+        # Use cookieless session acquisition to provision the user
+        first_name = user_id.split('@')[0] if '@' in user_id else 'Guest'
         
-        # Generate SSO URL pointing to a minimal Looker page
-        # We use a blank embed or the home page - this just triggers provisioning
-        base_uri = agent.LOOKER_INSTANCE_URI.rstrip('/')
-        
-        # Point to a simple page - the explore/browse page is lightweight
-        # After loading, we redirect back to our app
-        target_url = f"{base_uri}/browse"
-        
-        # Generate signed URL
-        signed_url = embed_manager.generate_signed_url(
-            target_url=target_url,
+        result = embed_manager.acquire_cookieless_session(
             user_id=user_id,
-            first_name=user_id.split('@')[0] if '@' in user_id else user_id,
-            last_name="(Auto)"
+            first_name=first_name,
+            last_name="User"
         )
         
-        # Redirect user to Looker (this provisions them)
-        # We can't easily redirect them BACK from Looker embed, so we use a different approach:
-        # Return the signed URL and let the frontend handle the flow
         return jsonify({
-            'looker_url': signed_url,
-            'return_url': return_url
+            'provisioned': True,
+            'user_id': user_id,
+            **result
         })
         
     except Exception as e:
         print(f"Looker Provision Error: {e}")
-        # Don't fail hard - just return error and let frontend handle
-        return jsonify({'error': str(e), 'return_url': return_url}), 500
+        return jsonify({'error': str(e), 'provisioned': False}), 500
 
 
 

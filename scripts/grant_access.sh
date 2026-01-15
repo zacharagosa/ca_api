@@ -2,7 +2,7 @@
 # Grant a user full access to the Gaming Analytics application
 # This script handles:
 #   1. Cloud Run IAM access
-#   2. Looker group membership (for data access)
+#   2. Looker embed user provisioning (via cookieless embed API)
 #
 # Usage: ./scripts/grant_access.sh user@example.com
 
@@ -14,7 +14,7 @@ if [ -z "$1" ]; then
   echo ""
   echo "This grants access to:"
   echo "  • Cloud Run service (if not public)"
-  echo "  • Looker 'Gaming Analytics Users' group"
+  echo "  • Looker embed user (auto-provisioned)"
   exit 1
 fi
 
@@ -51,18 +51,26 @@ gcloud run services add-iam-policy-binding $SERVICE_NAME \
 echo "  ✅ Cloud Run access configured"
 echo ""
 
-# Step 2: Looker Access
-echo "Step 2: Looker Access"
+# Step 2: Looker Embed User Provisioning
+echo "Step 2: Looker Embed User"
 echo "------------------------"
-cd "$PROJECT_DIR"
-if [ -f "scripts/looker_access.py" ]; then
-  # Activate virtual environment if available
-  if [ -f "venv/bin/activate" ]; then
-    source venv/bin/activate
+SERVICE_URL=$(gcloud run services describe $SERVICE_NAME --region $REGION --project $PROJECT_ID --format='value(status.url)' 2>/dev/null || echo "")
+
+if [ -n "$SERVICE_URL" ]; then
+  # Call the provision endpoint to create the embed user
+  PROVISION_RESPONSE=$(curl -s "${SERVICE_URL}/api/looker-provision?user_id=${USER_EMAIL}" 2>/dev/null)
+  
+  if echo "$PROVISION_RESPONSE" | grep -q '"provisioned": true' 2>/dev/null; then
+    echo "  ✅ Looker embed user provisioned"
+  elif echo "$PROVISION_RESPONSE" | grep -q '"provisioned":true' 2>/dev/null; then
+    echo "  ✅ Looker embed user provisioned"
+  else
+    echo "  ⚠️  Looker provisioning response: $PROVISION_RESPONSE"
+    echo "  Note: User will be auto-provisioned on first app login"
   fi
-  python scripts/looker_access.py grant "$USER_EMAIL" 2>&1 || echo "  ⚠️  Looker access could not be configured (check credentials)"
 else
-  echo "  ⚠️  Looker access script not found - skipping"
+  echo "  ⚠️  Service URL not found - Looker provisioning skipped"
+  echo "  Note: User will be auto-provisioned on first app login"
 fi
 echo ""
 
@@ -71,9 +79,10 @@ echo "============================================"
 echo "  ✅ Access Grant Complete"
 echo "============================================"
 echo ""
-SERVICE_URL=$(gcloud run services describe $SERVICE_NAME --region $REGION --project $PROJECT_ID --format='value(status.url)' 2>/dev/null || echo "[Run deployment first]")
 echo "User $USER_EMAIL can now access:"
-echo "  $SERVICE_URL"
+echo "  ${SERVICE_URL:-[Deploy the app first]}"
 echo ""
-echo "IMPORTANT: If OAuth is in 'Testing' mode, also add the user to:"
-echo "  Google Cloud Console > APIs & Services > OAuth consent screen > Test users"
+echo "NOTES:"
+echo "  • Looker embed users are auto-provisioned (no internal license required)"
+echo "  • If OAuth is in 'Testing' mode, also add the user to:"
+echo "    Google Cloud Console > APIs & Services > OAuth consent screen > Test users"
