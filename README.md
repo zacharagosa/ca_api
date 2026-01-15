@@ -84,44 +84,66 @@ This will:
 2. Deploy to Cloud Run with IAM authentication
 3. Output the service URL
 
-### Access Management
+### Granting User Access (Complete Checklist)
 
-The deployed service requires Google IAM authentication. Only users explicitly granted access can use the application.
+There are **three access layers** that may need to be configured for a new user:
 
-#### Grant Access to a User
+#### Step 1: Google OAuth Test Users (Required if OAuth is in "Testing" mode)
+
+If your OAuth consent screen is in "Testing" mode, you must add users to the test users list:
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Navigate to **APIs & Services** → **OAuth consent screen**
+3. Scroll to **Test users** section
+4. Click **ADD USERS** and add the user's email
+5. Save
+
+> **Note**: If you publish the app to "In production" mode, this step is not needed (but unverified apps will show a warning screen to users).
+
+#### Step 2: Cloud Run Access (Currently Public)
+
+The service is currently configured with `allUsers` access, so this step is **not required**. However, if you want to restrict access to specific users:
+
 ```bash
+# Remove public access first
+gcloud run services remove-iam-policy-binding gaming-analytics \
+  --project aragosalooker \
+  --region us-central1 \
+  --member="allUsers" \
+  --role="roles/run.invoker"
+
+# Then grant individual users
 ./scripts/grant_access.sh user@example.com
 ```
 
-#### Revoke Access
-```bash
-./scripts/revoke_access.sh user@example.com
-```
+#### Step 3: Looker Permissions (If Applicable)
 
-#### List All Users with Access
-```bash
-./scripts/list_access.sh
-```
+Users need appropriate Looker permissions to view data. This is managed in your Looker Admin panel:
+- Users need access to the `gaming` model and `events` explore
+- Grant via Looker Groups or individual user permissions
 
-#### Grant Access to a Google Group
-To grant access to multiple users at once, create a Google Group and grant access to the group:
-```bash
-gcloud run services add-iam-policy-binding gaming-analytics \
-  --project YOUR_PROJECT_ID \
-  --region us-central1 \
-  --member="group:analytics-users@your-domain.com" \
-  --role="roles/run.invoker"
-```
+### Access Management Scripts
+
+| Script | Description |
+|--------|-------------|
+| `./scripts/grant_access.sh email` | Grant Cloud Run access |
+| `./scripts/revoke_access.sh email` | Remove Cloud Run access |
+| `./scripts/list_access.sh` | List all authorized users |
 
 ### For End Users
 
-Once granted access, users can access the application by:
+1. **Have admin complete the checklist above** for your email
+2. **Sign into Chrome** with your authorized Google account
+3. **Navigate to the service URL**: https://gaming-analytics-wyjzl3wjfa-uc.a.run.app
 
-1. **Sign into Chrome** with their authorized Google account
-2. **Navigate to the service URL** (provided after deployment)
-3. The application will automatically authenticate using their Google identity
+### Troubleshooting Access Issues
 
-> **Note**: If users see a "403 Forbidden" error, verify they have been granted access using `./scripts/list_access.sh`
+| Symptom | Cause | Solution |
+|---------|-------|----------|
+| "Request submitted" screen | OAuth consent screen in Testing mode | Add user to OAuth test users (Step 1) |
+| "403 Forbidden" | Cloud Run IAM blocking | Run `./scripts/grant_access.sh email` |
+| App loads but no data | Looker permissions missing | Grant Looker access (Step 3) |
+| "Sign-in error" popup | Invalid OAuth client config | Verify `VITE_GOOGLE_CLIENT_ID` |
 
 ---
 

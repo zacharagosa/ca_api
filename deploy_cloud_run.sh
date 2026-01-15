@@ -35,7 +35,7 @@ gcloud run deploy $SERVICE_NAME \
   --project ${PROJECT_ID} \
   --source . \
   --region $REGION \
-  --no-allow-unauthenticated \
+  --allow-unauthenticated \
   --set-env-vars PROJECT_ID=${PROJECT_ID},LOCATION=${LOCATION:-global},LOOKER_CLIENT_ID=${LOOKER_CLIENT_ID},LOOKER_CLIENT_SECRET=${LOOKER_CLIENT_SECRET},LOOKER_INSTANCE_URI=${LOOKER_INSTANCE_URI},LOOKML_MODEL=${LOOKML_MODEL:-gaming},EXPLORE=${EXPLORE:-events},DATASET_NAME=${DATASET_NAME:-events}
 
 # Get the service URL
