@@ -103,9 +103,9 @@ def grant_access(email, group_name="Gaming Analytics Users"):
     
     print(f"User: {user.first_name} {user.last_name} (ID: {user.id})")
     
-    # Check if already in group
-    user_groups = sdk.user_groups(user.id)
-    if any(g.id == group.id for g in user_groups):
+    # Check if already in group by getting group members
+    group_users = sdk.all_group_users(group.id)
+    if any(u.id == user.id for u in group_users):
         print(f"✅ User {email} is already in group '{group_name}'")
         return True
     
