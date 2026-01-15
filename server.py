@@ -540,7 +540,7 @@ def get_embed_url():
             from urllib.parse import urlparse
             parsed = urlparse(embed_domain)
             embed_domain = f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else None
-            print(f"  Embed Domain: {embed_domain}")
+            print(f"  Embed Domain (Detected): {embed_domain}")
 
         # Acquire cookieless embed session
         session_result = embed_manager.acquire_cookieless_session(

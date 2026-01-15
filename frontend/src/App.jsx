@@ -804,21 +804,36 @@ function App() {
             // acquireSession callback - called when SDK needs a new session
             async () => {
               console.log('SDK requesting new session');
-              const resp = await fetch(`${API_BASE_URL}/api/embed`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(requestPayload)
-              });
-              const newSession = await resp.json();
-              return {
-                authentication_token: newSession.authentication_token,
-                authentication_token_ttl: newSession.authentication_token_ttl,
-                navigation_token: newSession.navigation_token,
-                navigation_token_ttl: newSession.navigation_token_ttl,
-                session_reference_token_ttl: newSession.session_reference_token_ttl,
-                api_token: newSession.api_token,
-                api_token_ttl: newSession.api_token_ttl,
-              };
+              try {
+                const resp = await fetch(`${API_BASE_URL}/api/embed`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(requestPayload)
+                });
+
+                if (!resp.ok) {
+                  const errText = await resp.text();
+                  console.error('SDK session fetch failed:', resp.status, errText);
+                  throw new Error('Failed to acquire SDK session');
+                }
+
+                const newSession = await resp.json();
+                console.log('SDK acquired session successfully', newSession.authentication_token ? '(Token present)' : '(No token)');
+
+                return {
+                  authentication_token: newSession.authentication_token,
+                  authentication_token_ttl: newSession.authentication_token_ttl,
+                  navigation_token: newSession.navigation_token,
+                  navigation_token_ttl: newSession.navigation_token_ttl,
+                  session_reference_token_ttl: newSession.session_reference_token_ttl,
+                  api_token: newSession.api_token,
+                  api_token_ttl: newSession.api_token_ttl,
+                };
+              } catch (e) {
+                console.error('Error in SDK acquireSession:', e);
+                // Throwing here might cause the SDK to retry or fail gracefully
+                throw e;
+              }
             },
             // generateTokens callback - called when SDK needs to refresh tokens
             async (tokens) => {
