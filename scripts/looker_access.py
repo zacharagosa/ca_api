@@ -70,22 +70,34 @@ def find_user_by_email(sdk, email):
 
 
 def create_user(sdk, email):
-    """Create a new Looker user with the given email."""
+    """Create a new Looker user with the given email.
+    
+    Note: On Looker (Google Cloud core), users must sign in via Google SSO first
+    to be auto-provisioned. This function will fail on those instances.
+    """
     from looker_sdk import models40
     
     print(f"Creating new Looker user: {email}")
     
-    # Create credential_email for the user
-    user = sdk.create_user(body=models40.WriteUser(
-        first_name=email.split("@")[0],
-        last_name="(Auto-provisioned)",
-        is_disabled=False
-    ))
-    
-    # Add email credential
-    sdk.create_user_credentials_email(user.id, body=models40.WriteCredentialsEmail(email=email))
-    
-    return user
+    try:
+        # Create user
+        user = sdk.create_user(body=models40.WriteUser(
+            first_name=email.split("@")[0],
+            last_name="(Auto-provisioned)",
+            is_disabled=False
+        ))
+        
+        # Add email credential (may fail on Looker Cloud Core)
+        sdk.create_user_credentials_email(user.id, body=models40.WriteCredentialsEmail(email=email))
+        
+        return user
+    except Exception as e:
+        if "Unsupported in Looker (Google Cloud core)" in str(e):
+            print(f"⚠️  Cannot create user via API on Looker (Google Cloud core).")
+            print(f"   The user must sign into Looker directly first to be auto-provisioned.")
+            print(f"   After they sign in once, run this script again to add them to the group.")
+            return None
+        raise e
 
 
 def grant_access(email, group_name="Gaming Analytics Users"):
@@ -100,6 +112,9 @@ def grant_access(email, group_name="Gaming Analytics Users"):
     user = find_user_by_email(sdk, email)
     if not user:
         user = create_user(sdk, email)
+        if not user:
+            # Creation failed (e.g., Looker Cloud Core) - user needs to sign in first
+            return False
     
     print(f"User: {user.first_name} {user.last_name} (ID: {user.id})")
     
