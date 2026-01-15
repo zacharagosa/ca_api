@@ -32,9 +32,15 @@ class LookerEmbedManager:
     def generate_signed_url(self, target_url, user_id, first_name="Gaming", last_name="Analyst"):
         """
         Uses the Looker API to generate a Signed Embed URL.
-        (Legacy method - use cookieless methods for new implementations)
         """
         import agent
+        
+        print(f"=== Generating SSO Embed URL ===")
+        print(f"  Target URL: {target_url}")
+        print(f"  User ID: {user_id}")
+        print(f"  Name: {first_name} {last_name}")
+        print(f"  LookML Model: {agent.LOOKML_MODEL}")
+        print(f"  Looker Instance: {self.looker_uri}")
         
         body = models40.EmbedSsoParams(
             target_url=target_url,
@@ -49,14 +55,21 @@ class LookerEmbedManager:
             external_group_id="",
             user_attributes={"locale": "en_US"}
         )
+        
+        print(f"  Permissions: {body.permissions}")
+        print(f"  Models: {body.models}")
 
         try:
             response = self.sdk.create_sso_embed_url(body=body)
+            print(f"  ✅ Generated URL successfully (length: {len(response.url)})")
+            print(f"  URL Preview: {response.url[:150]}...")
             return response.url
         except Exception as e:
-            print(f"SDK Embed Error: {e}")
+            print(f"  ❌ SDK Embed Error: {e}")
             if "RemoteDisconnected" in str(e) or "Connection refused" in str(e):
-                print("HINT: check if LOOKERSDK_BASE_URL needs port 19999 or /api/4.0 suffix.")
+                print("  HINT: check if LOOKERSDK_BASE_URL needs port 19999 or /api/4.0 suffix.")
+            if "not enabled" in str(e).lower() or "sso" in str(e).lower():
+                print("  HINT: Embed SSO Authentication must be enabled in Looker Admin > Platform > Embed")
             raise e
 
     def acquire_cookieless_session(self, user_id, first_name="Guest", last_name="User", 
