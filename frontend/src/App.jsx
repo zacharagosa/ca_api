@@ -770,7 +770,7 @@ function App() {
           first_name: userEmail ? userEmail.split('@')[0] : 'Guest',
           last_name: 'User'
         };
-        console.log('Fetching embed URL for:', dashboard.url, 'user:', userEmail);
+        console.log('Fetching SSO embed URL for:', dashboard.url, 'user:', userEmail);
 
         const response = await fetch(`${API_BASE_URL}/api/embed`, {
           method: 'POST',
@@ -787,18 +787,11 @@ function App() {
 
         const data = await response.json();
 
-        // Handle both cookieless and signed URL responses
-        if (data.type === 'cookieless') {
-          // For cookieless, we need to construct the embed URL with authentication token
-          // The URL format is: https://instance/login/embed/<auth_token>?embed_path=<target_path>
-          const targetPath = new URL(data.target_url).pathname;
-          const embedUrl = `${data.looker_host}/login/embed/${encodeURIComponent(data.authentication_token)}?embed_path=${encodeURIComponent(targetPath)}`;
-          setSignedUrl(embedUrl);
-          console.log('Using cookieless embed URL');
-        } else if (data.url) {
-          // Legacy signed URL
+        if (data.url) {
           setSignedUrl(data.url);
-          console.log('Using signed embed URL');
+          console.log('Using signed SSO embed URL');
+        } else {
+          throw new Error('No embed URL returned');
         }
 
       } catch (e) {

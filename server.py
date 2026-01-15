@@ -502,10 +502,10 @@ except Exception as e:
 @app.route('/api/embed', methods=['POST'])
 def get_embed_url():
     """
-    Generates a Looker embed URL using cookieless embed session.
+    Generates a signed Looker SSO embed URL.
     
-    For cookieless embed, we acquire a session and return tokens that
-    the frontend will use with the Looker Embed SDK.
+    This uses Looker's SSO embed which creates a fully signed URL that
+    authenticates the user automatically - no additional login required.
     """
     if not embed_manager:
         return jsonify({'error': 'Embed Manager not initialized'}), 500
@@ -519,14 +519,6 @@ def get_embed_url():
         user_id = data.get('user_id', 'embed_user')
         first_name = data.get('first_name', 'Guest')
         last_name = data.get('last_name', 'User')
-        session_reference_token = data.get('session_reference_token')
-        
-        # Get embed domain from request origin
-        embed_domain = request.headers.get('Origin') or request.headers.get('Referer')
-        if embed_domain:
-            from urllib.parse import urlparse
-            parsed = urlparse(embed_domain)
-            embed_domain = f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else None
 
         # Ensure we construct the full target URL
         if not target_path.startswith('http'):
@@ -537,43 +529,27 @@ def get_embed_url():
         else:
             full_target_url = target_path
 
-        # Try cookieless embed first, fall back to signed URL
-        try:
-            session_result = embed_manager.acquire_cookieless_session(
-                user_id=user_id,
-                first_name=first_name,
-                last_name=last_name,
-                session_reference_token=session_reference_token,
-                embed_domain=embed_domain
-            )
-            
-            # Return both the target URL and session tokens
-            # Frontend will use these with Looker Embed SDK
-            return jsonify({
-                'type': 'cookieless',
-                'target_url': full_target_url,
-                'looker_host': agent.LOOKER_INSTANCE_URI,
-                **session_result
-            })
-            
-        except Exception as cookieless_error:
-            print(f"Cookieless embed failed, trying signed URL: {cookieless_error}")
-            
-            # Fallback to signed URL (legacy method)
-            signed_url = embed_manager.generate_signed_url(
-                target_url=full_target_url,
-                user_id=user_id,
-                first_name=first_name,
-                last_name=last_name
-            )
-            
-            return jsonify({
-                'type': 'signed',
-                'url': signed_url
-            })
+        print(f"Generating SSO embed URL for: {full_target_url}, user: {user_id}")
+        
+        # Generate signed SSO embed URL - this provides seamless auth
+        signed_url = embed_manager.generate_signed_url(
+            target_url=full_target_url,
+            user_id=user_id,
+            first_name=first_name,
+            last_name=last_name
+        )
+        
+        print(f"Generated signed URL: {signed_url[:100]}...")
+        
+        return jsonify({
+            'url': signed_url,
+            'type': 'signed'
+        })
 
     except Exception as e:
         print(f"Embed Gen Error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 
