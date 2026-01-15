@@ -50,7 +50,7 @@ class LookerEmbedManager:
             first_name=first_name,
             last_name=last_name,
             permissions=["access_data", "see_looks", "see_user_dashboards", "see_lookml_dashboards", "explore"],
-            models=[agent.LOOKML_MODEL],
+            models=list(set([agent.LOOKML_MODEL, "gaming", "snowplow"])),
             group_ids=[],
             external_group_id="",
             user_attributes={"locale": "en_US"}

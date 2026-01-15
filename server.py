@@ -534,32 +534,20 @@ def get_embed_url():
         print(f"  User ID: {user_id}")
         print(f"  Name: {first_name} {last_name}")
 
-        # Get embed domain from request origin for dynamic registration
-        embed_domain = request.headers.get('Origin') or request.headers.get('Referer')
-        if embed_domain:
-            from urllib.parse import urlparse
-            parsed = urlparse(embed_domain)
-            embed_domain = f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else None
-            print(f"  Embed Domain (Detected): {embed_domain}")
-
-        # Acquire cookieless embed session
-        session_result = embed_manager.acquire_cookieless_session(
+        # Generate Signed SSO URL (Legacy/Stable approach)
+        signed_url = embed_manager.generate_signed_url(
+            target_url=full_target_url,
             user_id=user_id,
             first_name=first_name,
-            last_name=last_name,
-            session_reference_token=data.get('session_reference_token'),
-            embed_domain=embed_domain
+            last_name=last_name
         )
         
-        print(f"  ✅ Session acquired successfully")
-        print(f"  Auth Token TTL: {session_result.get('authentication_token_ttl')}s")
+        print(f"  ✅ Signed URL generated successfully")
         
-        # Return session tokens and target URL for the frontend
+        # Return signed URL for the frontend fallback handler
         return jsonify({
-            'type': 'cookieless',
-            'target_url': full_target_url,
-            'looker_host': agent.LOOKER_INSTANCE_URI,
-            **session_result
+            'type': 'sso',
+            'url': signed_url
         })
 
     except Exception as e:
