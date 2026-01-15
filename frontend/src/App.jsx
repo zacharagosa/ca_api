@@ -793,7 +793,6 @@ function App() {
 
         if (data.type === 'cookieless' && data.authentication_token) {
           console.log('Received cookieless embed session');
-          setEmbedSession(data);
 
           // Initialize the Looker Embed SDK with cookieless auth
           const lookerHost = data.looker_host.replace(/^https?:\/\//, '');
@@ -835,35 +834,8 @@ function App() {
             }
           );
 
-          // Now create the embed using the SDK
-          if (embedContainerRef.current) {
-            // Clear any existing content
-            embedContainerRef.current.innerHTML = '';
-
-            // Extract the dashboard path from the target URL
-            const targetUrl = new URL(data.target_url);
-            const dashboardPath = targetUrl.pathname;
-
-            // Check if it's a dashboard ID or slug
-            const dashboardMatch = dashboardPath.match(/\/embed\/dashboards\/(.+)/);
-            if (dashboardMatch) {
-              const dashboardId = dashboardMatch[1];
-              console.log('Creating embed for dashboard:', dashboardId);
-
-              LookerEmbedSDK.createDashboardWithId(dashboardId)
-                .appendTo(embedContainerRef.current)
-                .withClassName('looker-embed-dashboard')
-                .build()
-                .connect()
-                .then((dashboard) => {
-                  console.log('Dashboard embed connected successfully');
-                })
-                .catch((error) => {
-                  console.error('Dashboard embed error:', error);
-                  setEmbedError('Failed to load dashboard: ' + error.message);
-                });
-            }
-          }
+          // Store the session data - dashboard creation happens in separate useEffect
+          setEmbedSession(data);
         } else if (data.url) {
           // Fallback to signed URL
           setSignedUrl(data.url);
@@ -880,6 +852,55 @@ function App() {
 
     fetchEmbedSession();
   }, [activeDashboard, accessToken, datasetConfig.dashboards]);
+
+  // Create the dashboard embed AFTER the container is rendered
+  // Create the dashboard embed AFTER the container is rendered
+  useEffect(() => {
+    // If we have a session but no container yet, we simply return and wait for the
+    // component to re-render with the container div (which is conditioned on embedSession)
+    if (!embedSession || !embedContainerRef.current) {
+      return;
+    }
+
+    // Use a small timeout to ensure the DOM is fully updated and ref is stable
+    const timer = setTimeout(() => {
+      // Clear any existing content
+      if (embedContainerRef.current) {
+        embedContainerRef.current.innerHTML = '';
+
+        // Extract the dashboard path from the target URL
+        try {
+          const targetUrl = new URL(embedSession.target_url);
+          const dashboardPath = targetUrl.pathname;
+
+          // Check if it's a dashboard ID or slug
+          const dashboardMatch = dashboardPath.match(/\/embed\/dashboards\/(.+)/);
+          if (dashboardMatch) {
+            const dashboardId = dashboardMatch[1];
+            console.log('Creating embed for dashboard:', dashboardId);
+
+            LookerEmbedSDK.createDashboardWithId(dashboardId)
+              .appendTo(embedContainerRef.current)
+              .withClassName('looker-embed-dashboard')
+              .build()
+              .connect()
+              .then((dashboard) => {
+                console.log('Dashboard embed connected successfully');
+              })
+              .catch((error) => {
+                console.error('Dashboard embed error:', error);
+                setEmbedError('Failed to load dashboard: ' + error.message);
+              });
+          }
+        } catch (e) {
+          console.error('Error creating dashboard embed:', e);
+          setEmbedError('Failed to create dashboard embed');
+        }
+      }
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [embedSession, activeDashboard]); // Re-run when session or dashboard changes
 
 
   const login = useGoogleLogin({
@@ -1634,9 +1655,15 @@ function App() {
                 ) : embedSession ? (
                   <div
                     ref={embedContainerRef}
-                    style={{ width: '100%', height: '100%' }}
+                    style={{ width: '100%', height: '100%', position: 'relative' }}
                     className="looker-embed-container"
-                  />
+                  >
+                    {/* Loading indicator shown initially, SDK will replace content */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#666', position: 'absolute', inset: 0 }}>
+                      <Loader2 className="spin" size={32} />
+                      <span style={{ marginLeft: 10 }}>Loading Dashboard...</span>
+                    </div>
+                  </div>
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#666' }}>
                     <Loader2 className="spin" size={32} />
