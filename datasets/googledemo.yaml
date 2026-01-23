@@ -6,12 +6,12 @@ display_name: Gaming Events
 
 # Looker connection details - credentials loaded from environment variables
 looker:
-  instance_uri: https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app
+  instance_uri: https://googledemo.looker.com
   model: gaming
   explore: events
   # Environment variable names for credentials (not the actual values)
-  client_id_env: LOOKER_CLIENT_ID_EVENTS
-  client_secret_env: LOOKER_CLIENT_SECRET_EVENTS
+  client_id_env: LOOKER_CLIENT_ID_GOOGLEDEMO
+  client_secret_env: LOOKER_CLIENT_SECRET_GOOGLEDEMO
 
 # Single instruction block - automatically injected into all agents (fast mode, deep analysis, MCP)
 instructions: |
@@ -77,15 +77,15 @@ starter_questions:
 # Test scenarios for the Scenarios dropdown
 test_scenarios:
   - label: "Cohort Analysis"
-    question: "Show me weekly retention rates for the last 12 weeks. Visualized as a line chart."
+    question: "Show me weekly retention rates for users acquired in the last 12 weeks. Visualized as a line chart."
   - label: "Segmentation by OS"
     question: "Compare average session duration between iOS and Android users for the top 5 countries by revenue."
   - label: "Funnel Analysis"
-    question: "Visualize the count of distinct users by event name for the last 7 days, excluding 'session_start'."
+    question: "Visualize the drop-off count from 'tutorial_start' to 'tutorial_complete' to 'level_1_start' for the last 7 days."
   - label: "Revenue Trends"
     question: "Identify the top 3 revenue-generating events and their daily trend over the last month."
   - label: "User Acquisition ROI"
-    question: "Calculate total revenue and count of new users by Traffic Source for the last quarter."
+    question: "Evaluate our marketing spend. Calculate Return on Ad Spend (ROAS) and Cost Per Install (CPI) by Traffic Source for the last quarter."
 
 # Dashboards shown in the left panel (update with actual dashboard IDs from your Looker instance)
 dashboards:

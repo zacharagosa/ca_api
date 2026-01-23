@@ -77,20 +77,37 @@
 
   /* Sidebar Resizer */
   .sidebar-resizer {
-    width: 4px;
+    width: 6px;
     background-color: transparent;
     cursor: col-resize;
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    right: 0;
+    position: relative;
+    flex-shrink: 0;
     z-index: 50;
     transition: background-color 0.2s;
   }
 
+  .sidebar-resizer::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 4px;
+    height: 40px;
+    border-radius: 2px;
+    background-color: hsl(var(--muted-foreground) / 0.3);
+    transition: background-color 0.2s, height 0.2s;
+  }
+
+  .sidebar-resizer:hover::after,
+  .sidebar-resizer.resizing::after {
+    background-color: hsl(var(--primary));
+    height: 60px;
+  }
+
   .sidebar-resizer:hover,
   .sidebar-resizer.resizing {
-    background-color: hsl(var(--primary));
+    background-color: hsl(var(--primary) / 0.1);
   }
 
   /* Chart Container Styling - Light Theme */

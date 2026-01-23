@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm'
 import JSON5 from 'json5'
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, ArcElement, Filler } from 'chart.js';
 import { Bar, Line, Pie, Scatter } from 'react-chartjs-2';
-import { LookerEmbedSDK } from '@looker/embed-sdk';
+
 
 // UI Components
 import { Button } from "@/components/ui/button"
@@ -517,7 +517,12 @@ function App() {
   const [messages, setMessages] = useState([
     { role: 'agent', content: 'Hello! I am your mobile gaming data analyst. How can I help you today?' }
   ])
-  const [accessToken, setAccessToken] = useState(localStorage.getItem('looker_access_token'))
+  // Auto-authenticate when behind IAP (production) - skip login screen
+  // In development, still use localStorage for manual login
+  const isProduction = !window.location.hostname.includes('localhost');
+  const [accessToken, setAccessToken] = useState(
+    isProduction ? 'iap_authenticated' : localStorage.getItem('looker_access_token')
+  )
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [agentType, setAgentType] = useState('fast') // 'fast', 'deep', or 'mcp'
@@ -662,9 +667,9 @@ function App() {
 
   // LOOKER EMBED STATE
   const [signedUrl, setSignedUrl] = useState(null);
-  const [embedSession, setEmbedSession] = useState(null);
+
   const [embedError, setEmbedError] = useState(null);
-  const embedContainerRef = useRef(null);
+
   const sidebarRef = useRef(null);
 
   // Ref to track resize state in event listeners without dependency issues
@@ -793,72 +798,12 @@ function App() {
 
         const data = await response.json();
 
-        if (data.type === 'cookieless' && data.authentication_token) {
-          console.log('Received cookieless embed session');
-
-          // Initialize the Looker Embed SDK with cookieless auth
-          const lookerHost = data.looker_host.replace(/^https?:\/\//, '');
-
-          LookerEmbedSDK.initCookieless(
-            lookerHost,
-            // acquireSession callback - called when SDK needs a new session
-            async () => {
-              console.log('SDK requesting new session');
-              try {
-                const resp = await fetch(`${API_BASE_URL}/api/embed`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(requestPayload)
-                });
-
-                if (!resp.ok) {
-                  const errText = await resp.text();
-                  console.error('SDK session fetch failed:', resp.status, errText);
-                  throw new Error('Failed to acquire SDK session');
-                }
-
-                const newSession = await resp.json();
-                console.log('SDK acquired session successfully', newSession.authentication_token ? '(Token present)' : '(No token)');
-
-                return {
-                  authentication_token: newSession.authentication_token,
-                  authentication_token_ttl: newSession.authentication_token_ttl,
-                  navigation_token: newSession.navigation_token,
-                  navigation_token_ttl: newSession.navigation_token_ttl,
-                  session_reference_token_ttl: newSession.session_reference_token_ttl,
-                  api_token: newSession.api_token,
-                  api_token_ttl: newSession.api_token_ttl,
-                };
-              } catch (e) {
-                console.error('Error in SDK acquireSession:', e);
-                // Throwing here might cause the SDK to retry or fail gracefully
-                throw e;
-              }
-            },
-            // generateTokens callback - called when SDK needs to refresh tokens
-            async (tokens) => {
-              console.log('SDK requesting token refresh');
-              const resp = await fetch(`${API_BASE_URL}/api/generate-embed-tokens`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  session_reference_token: tokens.session_reference_token,
-                  api_token: tokens.api_token,
-                  navigation_token: tokens.navigation_token,
-                })
-              });
-              return await resp.json();
-            }
-          );
-
-          // Store the session data - dashboard creation happens in separate useEffect
-          setEmbedSession(data);
-        } else if (data.url) {
+        if (data.url) {
           // Fallback to signed URL
           setSignedUrl(data.url);
           console.log('Using signed SSO embed URL');
         } else {
-          throw new Error('No embed session or URL returned');
+          throw new Error('No embed valid URL returned');
         }
 
       } catch (e) {
@@ -872,65 +817,7 @@ function App() {
 
   // Create the dashboard embed AFTER the container is rendered
   // Create the dashboard embed AFTER the container is rendered
-  useEffect(() => {
-    // If we have a session but no container yet, we simply return and wait for the
-    // component to re-render with the container div (which is conditioned on embedSession)
-    if (!embedSession || !embedContainerRef.current) {
-      return;
-    }
 
-    // Use a small timeout to ensure the DOM is fully updated and ref is stable
-    const timer = setTimeout(() => {
-      // Clear any existing content
-      if (embedContainerRef.current) {
-        embedContainerRef.current.innerHTML = '';
-
-        // Extract the dashboard path from the target URL
-        try {
-          const targetUrl = new URL(embedSession.target_url);
-          const dashboardPath = targetUrl.pathname;
-
-          // Parse query params to pass to SDK
-          // The SDK requires params to be passed via .withParams()
-          const searchParams = new URLSearchParams(targetUrl.search);
-          const params = {};
-          for (const [key, value] of searchParams) {
-            params[key] = value;
-          }
-
-          // Check if it's a dashboard ID or slug
-          // Matches /embed/dashboards/123 or /dashboards/123
-          const dashboardMatch = dashboardPath.match(/\/(?:embed\/)?dashboards\/([^/]+)/);
-
-          if (dashboardMatch) {
-            const dashboardId = dashboardMatch[1];
-            console.log('Creating embed for dashboard:', dashboardId, 'with params:', params);
-
-            LookerEmbedSDK.createDashboardWithId(dashboardId)
-              .appendTo(embedContainerRef.current)
-              .withClassName('looker-embed-dashboard')
-              .withParams(params)
-              .build()
-              .connect()
-              .then((dashboard) => {
-                console.log('Dashboard embed connected successfully');
-              })
-              .catch((error) => {
-                console.error('Dashboard embed error:', error);
-                setEmbedError('Failed to load dashboard: ' + error.message);
-              });
-          } else {
-            console.error('Could not extract dashboard ID from path:', dashboardPath);
-          }
-        } catch (e) {
-          console.error('Error creating dashboard embed:', e);
-          setEmbedError('Failed to create dashboard embed');
-        }
-      }
-    }, 100);
-
-    return () => clearTimeout(timer);
-  }, [embedSession, activeDashboard]); // Re-run when session or dashboard changes
 
 
   const login = useGoogleLogin({
@@ -1033,8 +920,21 @@ function App() {
           logout();
           throw new Error('Session expired. Please log in again.');
         }
-        const data = await response.json()
-        throw new Error(data.error || 'Failed to fetch')
+        // Try to read the response body - might be JSON or plain text
+        let errorMessage = 'Failed to fetch';
+        try {
+          const responseText = await response.text();
+          try {
+            const data = JSON.parse(responseText);
+            errorMessage = data.error || errorMessage;
+          } catch {
+            // Response is not JSON, use text directly
+            errorMessage = responseText || `Server error: ${response.status}`;
+          }
+        } catch {
+          errorMessage = `Server error: ${response.status}`;
+        }
+        throw new Error(errorMessage);
       }
 
       const startTime = Date.now();
@@ -1537,7 +1437,9 @@ function App() {
     localStorage.removeItem('looker_access_token');
   };
 
-  if (!accessToken) {
+  // Login screen only shown in development mode when not authenticated
+  // In production, IAP handles authentication before users reach this point
+  if (!accessToken && !isProduction) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background p-4">
         <Card className="w-full max-w-md">
@@ -1578,7 +1480,7 @@ function App() {
               <select
                 value={activeDashboard}
                 onChange={(e) => setActiveDashboard(e.target.value)}
-                className="h-10 min-w-[200px] cursor-pointer rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                className="appearance-none h-10 min-w-[200px] cursor-pointer rounded-md border border-input bg-background pl-3 pr-8 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
               >
                 {datasetConfig.dashboards.map((dash) => (
                   <option key={dash.id} value={dash.id}>
@@ -1644,18 +1546,6 @@ function App() {
                     style={{ width: '100%', height: '100%', border: 'none' }}
                     title="Looker Dashboard"
                   />
-                ) : embedSession ? (
-                  <div
-                    ref={embedContainerRef}
-                    style={{ width: '100%', height: '100%', position: 'relative' }}
-                    className="looker-embed-container"
-                  >
-                    {/* Loading indicator shown initially, SDK will replace content */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#666', position: 'absolute', inset: 0 }}>
-                      <Loader2 className="spin" size={32} />
-                      <span style={{ marginLeft: 10 }}>Loading Dashboard...</span>
-                    </div>
-                  </div>
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#666' }}>
                     <Loader2 className="spin" size={32} />
@@ -1671,15 +1561,17 @@ function App() {
             </button>
           )}
         </section>
-      </div>
+      </div >
 
       {/* Resizer Handle */}
-      {isSidebarOpen && (
-        <div
-          className={`sidebar-resizer ${isResizing ? 'resizing' : ''}`}
-          onMouseDown={startResizing}
-        />
-      )}
+      {
+        isSidebarOpen && (
+          <div
+            className={`sidebar-resizer ${isResizing ? 'resizing' : ''}`}
+            onMouseDown={startResizing}
+          />
+        )
+      }
 
       {/* Assistant Sidebar */}
       <aside
@@ -1805,9 +1697,7 @@ function App() {
               <span>{isAutoTesting ? "Stop" : "Auto Test"}</span>
             </Button>
 
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setIsSidebarOpen(false)}>
-              <X className="h-4 w-4" />
-            </Button>
+
           </div>
         </header>
 
@@ -1990,7 +1880,7 @@ function App() {
         </footer>
 
       </aside>
-    </div>
+    </div >
   )
 }
 

@@ -52,13 +52,28 @@ def load_agent_config():
     except Exception as e:
         print(f"WARNING: Failed to load dataset config {dataset_path}: {e}")
     
+    # Substitute placeholders in all instructions with actual Looker config values
+    looker_config = config.get('_dataset', {}).get('looker', {})
+    model_name = looker_config.get('model') or os.getenv("LOOKML_MODEL", "gaming")
+    explore_name = looker_config.get('explore') or os.getenv("EXPLORE", "events")
+    
+    for agent_key in ['get_insights', 'unified_agent', 'deep_analysis']:
+        if agent_key in config:
+            for inst_key in ['system_instruction', 'instruction']:
+                if inst_key in config[agent_key]:
+                    config[agent_key][inst_key] = config[agent_key][inst_key].replace(
+                        '{LOOKML_MODEL}', model_name
+                    ).replace(
+                        '{EXPLORE}', explore_name
+                    )
+    
     return config
 
 AGENT_CONFIG = load_agent_config()
 
 load_dotenv()
 import threading
-from google.cloud import geminidataanalytics
+# from google.cloud import geminidataanalytics
 
 from google.adk.agents import Agent
 from google.adk.tools import agent_tool
@@ -116,11 +131,15 @@ PROJECT_ID = os.getenv("PROJECT_ID", "1094200614711")
 if PROJECT_ID == "aragosalooker":
     PROJECT_ID = "1094200614711" # Force numeric ID if default/old string is found
 LOCATION = os.getenv("LOCATION", "global")
-vertexai.init(
-    project=PROJECT_ID,
-    location=LOCATION,
-    staging_bucket="gs://ca_api",
-)
+try:
+    vertexai.init(
+        project=PROJECT_ID,
+        location=LOCATION,
+        staging_bucket="gs://ca_api",
+    )
+    print("INFO: Vertex AI initialized successfully")
+except Exception as e:
+    print(f"WARNING: Vertex AI initialization failed: {e}")
 
 
 import queue
@@ -160,6 +179,7 @@ _cached_datasource_refs = None
 def _get_cached_client():
     """Returns cached DataChatServiceClient, creating if needed."""
     global global_data_chat_client
+    from google.cloud import geminidataanalytics
     if global_data_chat_client is None:
         log_debug("Initializing Global DataChatServiceClient...")
         global_data_chat_client = geminidataanalytics.DataChatServiceClient(
@@ -170,6 +190,7 @@ def _get_cached_client():
 def _get_cached_datasource():
     """Returns cached datasource references, creating if needed."""
     global _cached_credentials, _cached_datasource_refs
+    from google.cloud import geminidataanalytics
     
     if _cached_datasource_refs is None:
         _cached_credentials = geminidataanalytics.Credentials(
@@ -205,6 +226,7 @@ def fast_query(question: str, history: list = []):
     Yields:
         dict: Chunks with type (text, data, done) and content
     """
+    from google.cloud import geminidataanalytics
     client = _get_cached_client()
     datasource_refs = _get_cached_datasource()
     
@@ -382,6 +404,22 @@ def fast_query(question: str, history: list = []):
                     messages=messages,
                 )
                 continue # Retry
+            
+            elif "CHART_GENERATION" in error_str and attempt < max_retries:
+                print(f"DEBUG: Caught CHART_GENERATION error: {error_str}. Retrying without chart generation...")
+                
+                # Append a correction message to disable chart generation for this turn
+                correction_msg = geminidataanalytics.Message()
+                correction_msg.user_message.text = "SYSTEM ERROR: Chart generation failed. Rerun the exact same query to get the data, but DO NOT call `generate_chart()`. Just return the text and data table."
+                messages.append(correction_msg)
+                
+                # Update request with new messages
+                request = geminidataanalytics.ChatRequest(
+                    inline_context=inline_context,
+                    parent=f"projects/{PROJECT_ID}/locations/global",
+                    messages=messages,
+                )
+                continue # Retry
             else:
                 yield {"type": "error", "content": error_str}
                 break
@@ -405,6 +443,7 @@ def get_insights(question: str):
     global global_data_chat_client
     if global_data_chat_client is None:
         log_debug("Initializing Global DataChatServiceClient...")
+        from google.cloud import geminidataanalytics
         global_data_chat_client = geminidataanalytics.DataChatServiceClient(
             credentials=auth_manager.get_credentials()
         )
@@ -412,6 +451,7 @@ def get_insights(question: str):
 
     # Always use service account Looker credentials as we are using Google Sign-In for app auth
     log_debug("Using service account Looker credentials.")
+    from google.cloud import geminidataanalytics
     credentials = geminidataanalytics.Credentials(
         oauth=geminidataanalytics.OAuthCredentials(
             secret=geminidataanalytics.OAuthCredentials.SecretBased(
@@ -881,56 +921,56 @@ unified_agent = Agent(
 mcp_agent = None
 mcp_app = None
 
-try:
-    mcp_toolset = MCPToolset(
-        connection_params=StdioConnectionParams(
-            command="./toolbox",
-            args=["--stdio", "--prebuilt", "looker"],
-            env={
-                "LOOKER_BASE_URL": LOOKER_INSTANCE_URI,
-                "LOOKER_CLIENT_ID": LOOKER_CLIENT_ID,
-                "LOOKER_CLIENT_SECRET": LOOKER_CLIENT_SECRET,
-                "LOOKER_VERIFY_SSL": "true",
-            }
-        )
-    )
+# try:
+#     mcp_toolset = MCPToolset(
+#         connection_params=StdioConnectionParams(
+#             command="./toolbox",
+#             args=["--stdio", "--prebuilt", "looker"],
+#             env={
+#                 "LOOKER_BASE_URL": LOOKER_INSTANCE_URI,
+#                 "LOOKER_CLIENT_ID": LOOKER_CLIENT_ID,
+#                 "LOOKER_CLIENT_SECRET": LOOKER_CLIENT_SECRET,
+#                 "LOOKER_VERIFY_SSL": "true",
+#             }
+#         )
+#     )
     
-    mcp_agent = Agent(
-        model="gemini-3-flash-preview",
-        name="LookerToolboxAgent",
-        instruction="""You are a Looker admin assistant with access to Looker Toolbox via MCP.
+#     mcp_agent = Agent(
+#         model="gemini-3-flash-preview",
+#         name="LookerToolboxAgent",
+#         instruction="""You are a Looker admin assistant with access to Looker Toolbox via MCP.
         
-You have access to powerful tools to interact with Looker:
+# You have access to power tools to interact with Looker:
 
-**Model & Query Tools:**
-- get_models, get_explores, get_dimensions, get_measures
-- query (run queries), query_sql, query_url
+# **Model & Query Tools:**
+# - get_models, get_explores, get_dimensions, get_measures
+# - query (run queries), query_sql, query_url
 
-**Content Tools:**
-- make_dashboard (create dashboards), add_dashboard_element, add_dashboard_filter
-- make_look (create Looks), run_look, run_dashboard
-- get_dashboards, get_looks, generate_embed_url
+# **Content Tools:**
+# - make_dashboard (create dashboards), add_dashboard_element, add_dashboard_filter
+# - make_look (create Looks), run_look, run_dashboard
+# - get_dashboards, get_looks, generate_embed_url
 
-**LookML Authoring:**
-- get_projects, get_project_files, get_project_file
-- create_project_file, update_project_file, delete_project_file
-- dev_mode (activate dev mode)
+# **LookML Authoring:**
+# - get_projects, get_project_files, get_project_file
+# - create_project_file, update_project_file, delete_project_file
+# - dev_mode (activate dev mode)
 
-**Health Tools:**
-- health_pulse, health_analyze, health_vacuum
+# **Health Tools:**
+# - health_pulse, health_analyze, health_vacuum
 
-When asked to create content, use the appropriate tools and return the URL.
-Always be helpful and explain what you're doing.""",
-        tools=[mcp_toolset],
-    )
+# When asked to create content, use the appropriate tools and return the URL.
+# Always be helpful and explain what you're doing.""",
+#         tools=[mcp_toolset],
+#     )
     
-    mcp_app = reasoning_engines.AdkApp(
-        agent=mcp_agent,
-        enable_tracing=False,
-    )
-    print("INFO: MCP Looker Toolbox agent initialized successfully")
-except Exception as e:
-    print(f"WARNING: Failed to initialize MCP Agent: {e}")
+#     mcp_app = reasoning_engines.AdkApp(
+#         agent=mcp_agent,
+#         enable_tracing=False,
+#     )
+#     print("INFO: MCP Looker Toolbox agent initialized successfully")
+# except Exception as e:
+#     print(f"WARNING: Failed to initialize MCP Agent: {e}")
 
 # vertexai.init is moved to the entry point (chat.py or deploy.py)
 # to avoid hardcoding the staging bucket in the remote environment.

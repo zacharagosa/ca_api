@@ -42,6 +42,12 @@ class LookerEmbedManager:
         print(f"  LookML Model: {agent.LOOKML_MODEL}")
         print(f"  Looker Instance: {self.looker_uri}")
         
+        # Force Looker theme if not already present
+        if "theme=" not in target_url:
+            separator = "&" if "?" in target_url else "?"
+            target_url = f"{target_url}{separator}theme=Looker"
+            print(f"  Updated Target URL with Theme: {target_url}")
+        
         body = models40.EmbedSsoParams(
             target_url=target_url,
             session_length=3600,
@@ -71,110 +77,3 @@ class LookerEmbedManager:
             if "not enabled" in str(e).lower() or "sso" in str(e).lower():
                 print("  HINT: Embed SSO Authentication must be enabled in Looker Admin > Platform > Embed")
             raise e
-
-    def acquire_cookieless_session(self, user_id, first_name="Guest", last_name="User", 
-                                    session_reference_token=None, embed_domain=None):
-        """
-        Acquire a cookieless embed session for an embed user.
-        
-        This creates an embed user on-the-fly without requiring an internal Looker license.
-        Returns tokens needed to initialize the embed iframe.
-        
-        Args:
-            user_id: Unique identifier for the embed user (e.g., email)
-            first_name: User's first name
-            last_name: User's last name
-            session_reference_token: Optional existing session token to rejoin
-            embed_domain: Optional embed domain (required if not in Looker allowlist)
-        
-        Returns:
-            dict with authentication_token, navigation_token, api_token, and TTLs
-        """
-        try:
-            # Build the embed user definition
-            embed_user = {
-                "external_user_id": user_id,
-                "first_name": first_name,
-                "last_name": last_name,
-                "permissions": [
-                    "access_data",
-                    "see_looks", 
-                    "see_user_dashboards",
-                    "see_lookml_dashboards",
-                    "explore"
-                ],
-                # Grant access to all potential models to avoid 403 errors if dataset config varies
-                "models": list(set([self.lookml_model, "gaming", "snowplow"])),
-                "group_ids": [],
-                "user_attributes": {"locale": "en_US"}
-            }
-            
-            # Add session reference token if rejoining existing session
-            if session_reference_token:
-                embed_user["session_reference_token"] = session_reference_token
-            
-            # Add embed domain if provided (for dynamic domain registration)
-            if embed_domain:
-                embed_user["embed_domain"] = embed_domain
-            
-            # Call the Looker API to acquire cookieless session
-            response = self.sdk.acquire_embed_cookieless_session(body=embed_user)
-            
-            return {
-                "authentication_token": response.authentication_token,
-                "authentication_token_ttl": response.authentication_token_ttl,
-                "navigation_token": response.navigation_token,
-                "navigation_token_ttl": response.navigation_token_ttl,
-                "api_token": response.api_token,
-                "api_token_ttl": response.api_token_ttl,
-                "session_reference_token": response.session_reference_token,
-                "session_reference_token_ttl": response.session_reference_token_ttl,
-            }
-            
-        except Exception as e:
-            print(f"Cookieless Session Error: {e}")
-            raise e
-
-    def generate_embed_tokens(self, session_reference_token, api_token=None, navigation_token=None):
-        """
-        Generate new tokens for an existing cookieless embed session.
-        
-        Called periodically by the embed SDK to refresh tokens before they expire.
-        
-        Args:
-            session_reference_token: The session reference token from acquire_cookieless_session
-            api_token: Current API token (optional)
-            navigation_token: Current navigation token (optional)
-        
-        Returns:
-            dict with refreshed tokens and TTLs
-        """
-        if not session_reference_token:
-            # Session expired
-            return {"session_reference_token_ttl": 0}
-        
-        try:
-            response = self.sdk.generate_tokens_for_cookieless_session(body={
-                "session_reference_token": session_reference_token,
-                "api_token": api_token or "",
-                "navigation_token": navigation_token or ""
-            })
-            
-            return {
-                "api_token": response.api_token,
-                "api_token_ttl": response.api_token_ttl,
-                "navigation_token": response.navigation_token,
-                "navigation_token_ttl": response.navigation_token_ttl,
-                "session_reference_token_ttl": response.session_reference_token_ttl,
-            }
-            
-        except Exception as e:
-            error_msg = str(e)
-            print(f"Token Generation Error: {e}")
-            
-            # Handle invalid tokens by expiring session
-            if "Invalid input tokens" in error_msg:
-                return {"session_reference_token_ttl": 0}
-            
-            raise e
-

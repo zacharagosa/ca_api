@@ -51,27 +51,11 @@ gcloud run services add-iam-policy-binding $SERVICE_NAME \
 echo "  ✅ Cloud Run access configured"
 echo ""
 
-# Step 2: Looker Embed User Provisioning
-echo "Step 2: Looker Embed User"
-echo "------------------------"
-SERVICE_URL=$(gcloud run services describe $SERVICE_NAME --region $REGION --project $PROJECT_ID --format='value(status.url)' 2>/dev/null || echo "")
-
-if [ -n "$SERVICE_URL" ]; then
-  # Call the provision endpoint to create the embed user
-  PROVISION_RESPONSE=$(curl -s "${SERVICE_URL}/api/looker-provision?user_id=${USER_EMAIL}" 2>/dev/null)
-  
-  if echo "$PROVISION_RESPONSE" | grep -q '"provisioned": true' 2>/dev/null; then
-    echo "  ✅ Looker embed user provisioned"
-  elif echo "$PROVISION_RESPONSE" | grep -q '"provisioned":true' 2>/dev/null; then
-    echo "  ✅ Looker embed user provisioned"
-  else
-    echo "  ⚠️  Looker provisioning response: $PROVISION_RESPONSE"
-    echo "  Note: User will be auto-provisioned on first app login"
-  fi
-else
-  echo "  ⚠️  Service URL not found - Looker provisioning skipped"
-  echo "  Note: User will be auto-provisioned on first app login"
-fi
+# Step 2: Looker Access
+echo "Step 2: Looker Access"
+echo "----------------------"
+echo "  Looker access is handled via Signed SSO."
+echo "  Users will be auto-provisioned upon first dashboard access."
 echo ""
 
 # Summary

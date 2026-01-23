@@ -17,7 +17,12 @@ COPY frontend/dist ./frontend/dist
 
 # Expose port
 ENV PORT=8080
+ENV PYTHONUNBUFFERED=1
 EXPOSE 8080
+
+# DEBUG: Verify copy
+RUN echo "=== Listing /app ===" && ls -la /app
+RUN echo "=== Listing /app/frontend/dist ===" && ls -la /app/frontend/dist
 
 # Run the server
 # We will use gunicorn for production

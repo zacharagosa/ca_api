@@ -20,8 +20,26 @@ from cache_manager import cache_manager
 
 # Vertex AI is initialized in agent.py to ensure it is configured before agent creation.
 
-app = Flask(__name__, static_folder='frontend/dist', static_url_path='')
+app = Flask(__name__, static_folder=os.path.abspath('frontend/dist'), static_url_path='')
 CORS(app, resources={r"/*": {"origins": "*"}})
+
+# DEBUG: Check if static files exist
+try:
+    print(f"DEBUG: CWD is {os.getcwd()}", flush=True)
+    print(f"DEBUG: Static Folder: {app.static_folder}", flush=True)
+    print(f"DEBUG: Listing current directory: {os.listdir('.')}", flush=True)
+    
+    if os.path.exists('frontend/dist'):
+        print(f"DEBUG: Listing frontend/dist: {os.listdir('frontend/dist')}", flush=True)
+        if os.path.exists('frontend/dist/index.html'):
+            print("DEBUG: frontend/dist/index.html FOUND.", flush=True)
+        else:
+            print("DEBUG: frontend/dist/index.html NOT FOUND!", flush=True)
+    else:
+        print("DEBUG: frontend/dist directory NOT FOUND!", flush=True)
+except Exception as e:
+    print(f"DEBUG: Error checking files: {e}", flush=True)
+
 
 @app.route('/')
 def serve_frontend():
@@ -35,6 +53,12 @@ def serve_static(path):
     else:
         return app.send_static_file('index.html')
 
+@app.errorhandler(Exception)
+def handle_exception(e):
+    import traceback
+    print(f"CRITICAL: Unhandled exception: {e}", flush=True)
+    traceback.print_exc()
+    return jsonify({"error": str(e), "trace": traceback.format_exc()}), 500
 
 @app.route('/chat', methods=['POST', 'OPTIONS'])
 def chat():
@@ -557,150 +581,26 @@ def get_embed_url():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/acquire-embed-session', methods=['POST'])
-def acquire_embed_session():
-    """
-    Acquire a cookieless embed session for the current user.
-    
-    Creates an embed user on-the-fly and returns tokens for initializing
-    the Looker embed iframe. No internal Looker license required.
-    
-    Body params:
-    - user_id: Unique identifier for the embed user (e.g., email)
-    - first_name: User's first name
-    - last_name: User's last name
-    - session_reference_token: Optional existing session token to rejoin
-    """
-    if not embed_manager:
-        return jsonify({'error': 'Looker Embed Manager not available'}), 500
-    
-    try:
-        data = request.json or {}
-        user_id = data.get('user_id')
-        
-        if not user_id:
-            return jsonify({'error': 'user_id is required'}), 400
-        
-        first_name = data.get('first_name', user_id.split('@')[0] if '@' in user_id else 'Guest')
-        last_name = data.get('last_name', 'User')
-        session_reference_token = data.get('session_reference_token')
-        
-        # Get embed domain from request origin for dynamic registration
-        embed_domain = request.headers.get('Origin') or request.headers.get('Referer')
-        if embed_domain:
-            # Extract just the domain part
-            from urllib.parse import urlparse
-            parsed = urlparse(embed_domain)
-            embed_domain = f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else None
-        
-        result = embed_manager.acquire_cookieless_session(
-            user_id=user_id,
-            first_name=first_name,
-            last_name=last_name,
-            session_reference_token=session_reference_token,
-            embed_domain=embed_domain
-        )
-        
-        # Don't return session_reference_token to client (keep it server-side for security)
-        # But for simplicity in this implementation, we return it for the client to manage
-        return jsonify(result)
-        
-    except Exception as e:
-        print(f"Acquire Embed Session Error: {e}")
-        return jsonify({'error': str(e)}), 500
 
-
-@app.route('/api/generate-embed-tokens', methods=['POST'])
-def generate_embed_tokens():
-    """
-    Generate new tokens for an existing cookieless embed session.
-    
-    Called periodically by the embed SDK/iframe to refresh tokens.
-    
-    Body params:
-    - session_reference_token: The session reference token
-    - api_token: Current API token
-    - navigation_token: Current navigation token
-    """
-    if not embed_manager:
-        return jsonify({'error': 'Looker Embed Manager not available'}), 500
-    
-    try:
-        data = request.json or {}
-        session_reference_token = data.get('session_reference_token')
-        api_token = data.get('api_token')
-        navigation_token = data.get('navigation_token')
-        
-        if not session_reference_token:
-            return jsonify({'session_reference_token_ttl': 0})
-        
-        result = embed_manager.generate_embed_tokens(
-            session_reference_token=session_reference_token,
-            api_token=api_token,
-            navigation_token=navigation_token
-        )
-        
-        return jsonify(result)
-        
-    except Exception as e:
-        print(f"Generate Embed Tokens Error: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/looker-provision', methods=['GET'])
-def looker_provision():
-    """
-    Auto-provision a user in Looker by creating an embed session.
-    
-    Uses cookieless embed to create the user without requiring internal license.
-    Returns session tokens that can be used for embedding.
-    """
-    user_id = request.args.get('user_id')
-    
-    if not user_id:
-        return jsonify({'error': 'user_id is required'}), 400
-    
-    if not embed_manager:
-        return jsonify({'error': 'Looker Embed Manager not available', 'provisioned': False}), 500
-    
-    try:
-        # Use cookieless session acquisition to provision the user
-        first_name = user_id.split('@')[0] if '@' in user_id else 'Guest'
-        
-        result = embed_manager.acquire_cookieless_session(
-            user_id=user_id,
-            first_name=first_name,
-            last_name="User"
-        )
-        
-        return jsonify({
-            'provisioned': True,
-            'user_id': user_id,
-            **result
-        })
-        
-    except Exception as e:
-        print(f"Looker Provision Error: {e}")
-        return jsonify({'error': str(e), 'provisioned': False}), 500
 
 
 
 if __name__ == '__main__':
-    try:
-        print("Initializing Backend Authentication...")
-        token = agent.auth_manager.get_auth_token()
-        print("Backend Authentication Successful. Token obtained.")
-    except Exception as e:
-        print(f"WARNING: Backend Authentication failed on startup: {e}")
-        if "Reauthentication is needed" in str(e):
-            print("Attempting automatic re-authentication via browser...")
-            import subprocess
-            try:
-                # Automatically open the browser for authentication
-                subprocess.Popen(['gcloud', 'auth', 'application-default', 'login'])
-            except FileNotFoundError:
-                print("Error: 'gcloud' CLI not found. Please install Google Cloud SDK.")
-        else:
-            print("Server will start, but external API calls might fail if not authenticated.")
+    # try:
+    #     print("Initializing Backend Authentication...")
+    #     token = agent.auth_manager.get_auth_token()
+    #     print("Backend Authentication Successful. Token obtained.")
+    # except Exception as e:
+    #     print(f"WARNING: Backend Authentication failed on startup: {e}")
+    #     if "Reauthentication is needed" in str(e):
+    #         print("Attempting automatic re-authentication via browser...")
+    #         import subprocess
+    #         try:
+    #             # Automatically open the browser for authentication
+    #             subprocess.Popen(['gcloud', 'auth', 'application-default', 'login'])
+    #         except FileNotFoundError:
+    #             print("Error: 'gcloud' CLI not found. Please install Google Cloud SDK.")
+    #     else:
+    #         print("Server will start, but external API calls might fail if not authenticated.")
 
     app.run(debug=True, host='0.0.0.0', port=8080)
