@@ -9,6 +9,12 @@ def load_agent_config():
     """
     Loads base instructions and merges with dataset-specific instructions.
     Dataset is determined by DATASET_NAME environment variable (default: events).
+    
+    Architecture:
+    - common: Shared constraints applied to ALL agents
+    - fast_mode: Operational rules for fast agent
+    - deep_mode: Operational rules for deep agent
+    - dataset: Domain knowledge from datasets/{name}.yaml
     """
     config = {}
     
@@ -24,48 +30,57 @@ def load_agent_config():
     dataset_name = os.getenv("DATASET_NAME", "events")
     dataset_path = f"datasets/{dataset_name}.yaml"
     
+    dataset_instruction = ""
     try:
         with open(dataset_path, 'r') as f:
             dataset_config = yaml.safe_load(f) or {}
         print(f"INFO: Loaded dataset config: {dataset_path}")
-        
-        # Merge dataset-specific instructions into base config
-        # Single 'instructions' block gets appended to ALL agent types
         dataset_instruction = dataset_config.get('instructions', '')
         
-        if dataset_instruction:
-            for agent_key in ['get_insights', 'unified_agent', 'deep_analysis']:
-                if agent_key in config:
-                    # Find the instruction key (system_instruction or instruction)
-                    if 'system_instruction' in config[agent_key]:
-                        config[agent_key]['system_instruction'] += "\n\n" + dataset_instruction
-                    elif 'instruction' in config[agent_key]:
-                        config[agent_key]['instruction'] += "\n\n" + dataset_instruction
-                        
-        # Also expose dataset metadata
+        # Expose dataset metadata
         config['_dataset'] = {
             'name': dataset_config.get('name', dataset_name),
             'display_name': dataset_config.get('display_name', dataset_name),
             'looker': dataset_config.get('looker', {})
         }
-        
     except Exception as e:
         print(f"WARNING: Failed to load dataset config {dataset_path}: {e}")
     
-    # Substitute placeholders in all instructions with actual Looker config values
+    # helper to safely get nested keys
+    def get_inst(section, key='system_instruction'):
+        return config.get(section, {}).get(key, '')
+
+    # Build Computed Instructions
+    # 1. Common constraints (Model rules + Analysis rules)
+    common_instruction = get_inst('common', 'model_constraints') + "\n\n" + get_inst('common', 'analysis_rules')
+    
+    # 2. Fast Mode = Common + Fast Mode Operational + Dataset
+    fast_final = f"{common_instruction}\n\n{get_inst('fast_mode')}\n\n{dataset_instruction}"
+    
+    # 3. Deep Mode = Common + Deep Mode Operational + Dataset
+    deep_final = f"{common_instruction}\n\n{get_inst('deep_mode')}\n\n{dataset_instruction}"
+    
+    # 4. Unified Agent (Legacy/Router) = Use existing instruction block but append dataset
+    unified_final = get_inst('unified_agent', 'instruction') + "\n\n" + dataset_instruction
+
+    # Store computed instructions
+    config['_computed'] = {
+        'fast_mode': fast_final,
+        'deep_mode': deep_final,
+        'unified_agent': unified_final
+    }
+    
+    # Substitute placeholders in all computed instructions with actual Looker config values
     looker_config = config.get('_dataset', {}).get('looker', {})
     model_name = looker_config.get('model') or os.getenv("LOOKML_MODEL", "gaming")
     explore_name = looker_config.get('explore') or os.getenv("EXPLORE", "events")
     
-    for agent_key in ['get_insights', 'unified_agent', 'deep_analysis']:
-        if agent_key in config:
-            for inst_key in ['system_instruction', 'instruction']:
-                if inst_key in config[agent_key]:
-                    config[agent_key][inst_key] = config[agent_key][inst_key].replace(
-                        '{LOOKML_MODEL}', model_name
-                    ).replace(
-                        '{EXPLORE}', explore_name
-                    )
+    for key in ['fast_mode', 'deep_mode', 'unified_agent']:
+        config['_computed'][key] = config['_computed'][key].replace(
+            '{LOOKML_MODEL}', model_name
+        ).replace(
+            '{EXPLORE}', explore_name
+        )
     
     return config
 
@@ -231,7 +246,11 @@ def fast_query(question: str, history: list = []):
     datasource_refs = _get_cached_datasource()
     
     # Updated system instruction to support explicit chart requests
-    system_instruction = "Answer directly with data. Be concise. If the user EXPLICITLY asks for a chart or visualization, prepend the exact string 'SHOW_CHART' to the text part of your response. CRITICAL: When using the `generate_chart` tool, you MUST call it with NO ARGUMENTS (e.g. `generate_chart()`). The tool automatically uses the active data context. If you provide ANY `data_source` argument (like a name or ID), the tool will FAIL."
+    system_instruction = AGENT_CONFIG.get('_computed', {}).get('fast_mode', '')
+    if not system_instruction:
+         # Fallback if config failed loading
+         print("WARNING: Fast mode instruction missing, using fallback.")
+         system_instruction = "Answer directly with data. Be concise."
     
     inline_context = geminidataanalytics.Context(
         system_instruction=system_instruction,
@@ -321,7 +340,7 @@ def fast_query(question: str, history: list = []):
     final_question = question
     lc_question = question.lower()
     if any(k in lc_question for k in ["chart", "graph", "plot", "visualize"]):
-        final_question += " (IMPORTANT SYSTEM INSTRUCTION: Call `generate_chart()` with NO arguments. Do NOT provide a name. Do NOT provide an ID. Just `generate_chart()`.)"
+        final_question += " (IMPORTANT SYSTEM INSTRUCTION: You MUST print the exact string `SHOW_CHART` on a new line at the end of your response. Do NOT try to generate Python code. Do NOT try to call `generate_chart()`. JUST print `SHOW_CHART`.)"
 
     current_msg = geminidataanalytics.Message()
     current_msg.user_message.text = final_question
@@ -335,7 +354,7 @@ def fast_query(question: str, history: list = []):
     
     
     # Retry loop for handling "DataResult not found" errors caused by model hallucination
-    max_retries = 1
+    max_retries = 3
     for attempt in range(max_retries + 1):
         try:
             stream = client.chat(request=request)
@@ -347,27 +366,55 @@ def fast_query(question: str, history: list = []):
                     message_dict = geminidataanalytics.SystemMessage.to_dict(item.system_message)
                     
                     if "text" in message_dict:
-                        # text is a dict with 'parts' array containing the actual text
+                        # API v2: text now has 'text_type' field (1=final answer, 2=thinking/reasoning)
                         text_data = message_dict["text"]
+                        text_type = text_data.get("text_type", 1) if isinstance(text_data, dict) else 1
+                        
                         if isinstance(text_data, dict) and "parts" in text_data:
                             text_content = " ".join(text_data["parts"])
                         elif isinstance(text_data, str):
                             text_content = text_data
                         else:
                             text_content = str(text_data)
-                        yield {"type": "text", "content": text_content}
+                        
+                        # text_type 2 = thinking/reasoning, text_type 1 = final answer
+                        if text_type == 2:
+                            yield {"type": "thought", "content": text_content}
+                        else:
+                            yield {"type": "text", "content": text_content}
+                    
+                    elif "schema" in message_dict:
+                        # API v2: Schema now comes as separate chunks - skip for now
+                        # Could be used to validate data later
+                        log_debug(f"Received schema chunk: {len(message_dict.get('schema', {}).get('fields', []))} fields")
+                        continue
+                    
                     elif "data" in message_dict:
                         data = message_dict["data"]
+                        
+                        # API v2: Data now streams in TWO chunks:
+                        # Chunk 1: {"data": {"query": {...}}} - query definition
+                        # Chunk 2: {"data": {"result": {...}}} - actual data
+                        
+                        # Skip query-only chunks (no result data)
+                        if "query" in data and "result" not in data:
+                            log_debug(f"Received query chunk: {data['query'].get('name', 'unnamed')}")
+                            continue
+                        
                         result = data.get("result", {})
                         
-                        # Fallback URL logic
+                        # Skip if no actual data rows
+                        if not result.get("data"):
+                            log_debug("Skipping data chunk with no rows")
+                            continue
+                        
+                        # Fallback URL logic (sql and explore_url no longer provided in v2)
                         if 'explore_url' not in result:
                             try:
                                 fields = [f['name'] for f in result.get('schema', {}).get('fields', []) if 'name' in f]
                                 if fields:
                                     fields_str = ",".join(fields)
                                     base_uri = LOOKER_INSTANCE_URI.rstrip('/')
-                                    # Simple fallback URL
                                     result['explore_url'] = f"{base_uri}/explore/{LOOKML_MODEL}/{EXPLORE}?fields={fields_str}&toggle=dat,pik,vis"
                             except Exception:
                                 pass
@@ -375,21 +422,44 @@ def fast_query(question: str, history: list = []):
                         yield {
                             "type": "data",
                             "content": {
-                                "rows": result.get("data", []),  # data is array of flat objects
+                                "rows": result.get("data", []),
                                 "schema": result.get("schema", {}),
-                                "sql": result.get("sql", ""),
+                                "sql": result.get("sql", ""),  # May be empty in v2
                                 "explore_url": result.get("explore_url", ""),
                             }
                         }
+                    
                     elif "chart" in message_dict:
-                         yield {"type": "chart", "content": message_dict["chart"]}
+                        chart = message_dict["chart"]
+                        
+                        # API v2: Chart also streams in TWO chunks:
+                        # Chunk 1: {"chart": {"query": {...}}} - chart request
+                        # Chunk 2: {"chart": {"result": {"vega_config": {...}}}} - chart config
+                        
+                        # Skip query-only chunks
+                        if "query" in chart and "result" not in chart:
+                            log_debug(f"Received chart query chunk")
+                            continue
+                        
+                        # Only yield when we have the result with vega_config
+                        if "result" in chart:
+                            yield {"type": "chart", "content": chart["result"]}
             
             yield {"type": "done", "content": None}
             break # Success, exit retry loop
             
         except Exception as e:
             error_str = str(e)
-            if "DataResult not found" in error_str and attempt < max_retries:
+            
+            # Handle Rate Limits (429)
+            if ("429" in error_str or "Resource exhausted" in error_str) and attempt < max_retries:
+                wait_time = 2 ** (attempt + 1) # 2s, 4s, 8s, 16s
+                print(f"WARNING: Resource exhausted (429). Retrying in {wait_time}s... (Attempt {attempt+1}/{max_retries})")
+                time.sleep(wait_time)
+                continue
+
+            # Handle Looker Hallucinations
+            elif "DataResult not found" in error_str and attempt < max_retries:
                 print(f"DEBUG: Caught DataResult error: {error_str}. Retrying with correction...")
                 
                 # Append a correction message to the history
@@ -411,6 +481,22 @@ def fast_query(question: str, history: list = []):
                 # Append a correction message to disable chart generation for this turn
                 correction_msg = geminidataanalytics.Message()
                 correction_msg.user_message.text = "SYSTEM ERROR: Chart generation failed. Rerun the exact same query to get the data, but DO NOT call `generate_chart()`. Just return the text and data table."
+                messages.append(correction_msg)
+                
+                # Update request with new messages
+                request = geminidataanalytics.ChatRequest(
+                    inline_context=inline_context,
+                    parent=f"projects/{PROJECT_ID}/locations/global",
+                    messages=messages,
+                )
+                continue # Retry
+            
+            elif "datasource(s) not found" in error_str.lower() and attempt < max_retries:
+                print(f"DEBUG: Caught datasource not found error: {error_str}. Retrying with model constraint...")
+                
+                # Append a correction message forcing correct model usage
+                correction_msg = geminidataanalytics.Message()
+                correction_msg.user_message.text = f"SYSTEM ERROR: You attempted to query a non-existent datasource. You MUST ONLY use the '{LOOKML_MODEL}' LookML model and the '{EXPLORE}' explore. DO NOT reference 'thelook_ecommerce' or any other model. Rerun your query using ONLY fields from '{EXPLORE}.*'."
                 messages.append(correction_msg)
                 
                 # Update request with new messages
@@ -699,30 +785,9 @@ def run_deep_analysis(question: str):
         tools=[analysis_tools],
         tool_config=ToolConfig(
             function_calling_config=ToolConfig.FunctionCallingConfig(
-                mode=ToolConfig.FunctionCallingConfig.Mode.AUTO,
             )
         ),
-        system_instruction=AGENT_CONFIG.get('deep_analysis', {}).get('system_instruction', """You are a Senior Data Analyst. The user has a complex request.
-        Your goal is to provide a comprehensive analysis by breaking down the problem, asking multiple questions to Looker AND the Knowledge Base, and synthesizing the results.
-
-        CRITICAL OUTPUT FORMATTING:
-        When presenting key metrics or comparisons, do NOT just write text. Use the special JSON block format below so the interface renders them as beautiful UI cards.
-
-        For Single Metrics:
-        ```json-metric
-        { "label": "Retention Rate", "value": "45%", "trend": "+5%", "description": "Day 1 Retention for iOS" }
-        ```
-
-        For Comparisons (Use multiple blocks or a list):
-        ```json-metric
-        [
-          { "label": "iOS Session", "value": "14m", "description": "Avg Duration" },
-          { "label": "Android Session", "value": "11m", "description": "Avg Duration" }
-        ]
-        ```
-
-        Always intersperse these blocks with your analysis text.
-        """)
+        system_instruction=AGENT_CONFIG.get('_computed', {}).get('deep_mode', "You are a Senior Data Analyst."),
     )
     
     chat = model.start_chat()
@@ -907,7 +972,7 @@ visualization_agent = Agent(
 unified_agent = Agent(
     model="gemini-3-flash-preview",
     name="UnifiedAnalyticsAgent",
-    instruction=AGENT_CONFIG.get('unified_agent', {}).get('instruction', """You are an expert mobile gaming data analyst..."""),
+    instruction=AGENT_CONFIG.get('_computed', {}).get('unified_agent', """You are an expert mobile gaming data analyst..."""),
     tools=[
         get_insights,
         perform_deep_analysis,

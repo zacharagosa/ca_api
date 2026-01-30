@@ -17,6 +17,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 // Custom Components
 import DataTableRenderer from './DataTableRenderer';
 import { LookerLink } from '@/components/LookerLink';
+import VegaChartRenderer from '@/components/VegaChartRenderer';
 
 ChartJS.register(
   CategoryScale,
@@ -344,6 +345,84 @@ const ThinkingProcessAccordion = ({ thoughts, isComplete }) => {
   );
 };
 
+// Enhanced Live Thinking Panel for better loading visibility
+const LiveThinkingPanel = ({ thoughts, currentThought, elapsedTime }) => {
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    // Auto-scroll to latest thought
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [thoughts, currentThought]);
+
+  return (
+    <div className="bg-muted text-foreground rounded-lg p-4 shadow-sm max-w-[85%] space-y-3">
+      {/* Header with animated indicator */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="relative flex items-center justify-center w-5 h-5">
+            <span className="absolute w-3 h-3 bg-primary rounded-full animate-ping opacity-75"></span>
+            <span className="relative w-2 h-2 bg-primary rounded-full"></span>
+          </div>
+          <span className="font-medium text-sm text-foreground">Analyzing your question...</span>
+        </div>
+        {elapsedTime !== undefined && (
+          <span className="text-[10px] font-mono text-muted-foreground bg-muted-foreground/10 px-2 py-0.5 rounded">
+            {Math.round(elapsedTime)}s
+          </span>
+        )}
+      </div>
+
+      {/* Thinking steps */}
+      {thoughts && thoughts.length > 0 && (
+        <div
+          ref={scrollRef}
+          className="border-l-2 border-primary/30 pl-3 space-y-2 max-h-[180px] overflow-y-auto"
+        >
+          {thoughts.map((thought, i) => {
+            // Parse thought into title and rest if it has the "Title: Description" format
+            const colonIndex = thought.indexOf(':');
+            const hasTitle = colonIndex > 0 && colonIndex < 40;
+            const title = hasTitle ? thought.substring(0, colonIndex).trim() : null;
+            const description = hasTitle ? thought.substring(colonIndex + 1).trim() : thought;
+
+            return (
+              <div
+                key={i}
+                className={`text-xs ${i === thoughts.length - 1 ? 'text-foreground' : 'text-muted-foreground'} animate-in slide-in-from-left-2 duration-300`}
+              >
+                <div className="flex items-start gap-2">
+                  <span className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${i === thoughts.length - 1 ? 'bg-primary' : 'bg-muted-foreground/50'}`}></span>
+                  <div>
+                    {title && (
+                      <span className="font-semibold text-primary">{title}: </span>
+                    )}
+                    <span className="leading-relaxed">{description.substring(0, 120)}{description.length > 120 ? '...' : ''}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Current action with shimmer effect */}
+      {currentThought && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground pt-2 border-t border-muted-foreground/10">
+          <Loader2 className="animate-spin text-primary" size={12} />
+          <span className="animate-pulse truncate">{currentThought}</span>
+        </div>
+      )}
+
+      {/* Progress bar skeleton */}
+      <div className="h-1 bg-muted-foreground/10 rounded-full overflow-hidden">
+        <div className="h-full bg-gradient-to-r from-primary/50 via-primary to-primary/50 animate-pulse rounded-full w-full"></div>
+      </div>
+    </div>
+  );
+};
+
 const TimingPopup = ({ timings }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -434,41 +513,40 @@ const QueryDetails = ({ details }) => {
   if (!details) return null;
 
   return (
-    <div className="metadata-accordion">
+    <div className="border rounded-md bg-muted/30 my-2 query-details-wrapper">
       <button
         type="button"
-        className="metadata-header"
+        className="flex items-center justify-between w-full px-3 py-2 text-sm font-medium hover:bg-muted/50 transition-colors rounded-t-md text-foreground"
         onClick={() => setIsOpen(!isOpen)}
-        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px', background: 'rgba(255, 255, 255, 0.05)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '8px', cursor: 'pointer', color: 'var(--text-primary)' }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Code size={16} className="text-blue-400" />
-          <span style={{ fontWeight: 500 }}>Query Details</span>
+        <div className="flex items-center gap-2">
+          <Code size={16} className="text-primary" />
+          <span>Query Details</span>
         </div>
         {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
       </button>
 
       {isOpen && (
-        <div className="metadata-content" style={{ marginTop: '8px', padding: '12px', background: 'rgba(0, 0, 0, 0.2)', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+        <div className="p-3 border-t bg-card rounded-b-md space-y-3">
           {details.question && (
-            <div style={{ marginBottom: '12px' }}>
-              <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Question</div>
-              <div style={{ fontSize: '0.9rem' }}>{details.question}</div>
+            <div>
+              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Question</div>
+              <div className="text-sm text-foreground">{details.question}</div>
             </div>
           )}
 
           {details.filters && (
-            <div style={{ marginBottom: '12px' }}>
-              <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Filters</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+            <div>
+              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Filters</div>
+              <div className="flex flex-wrap gap-2">
                 {details.string_filters && details.string_filters.map((f, i) => (
-                  <span key={i} style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#93c5fd', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem', fontFamily: 'monospace' }}>
+                  <span key={i} className="px-2 py-0.5 rounded text-xs font-mono bg-primary/10 text-primary border border-primary/20">
                     {f.field_name}: {f.field_value}
                   </span>
                 ))}
                 {/* Handle other filter formats if present */}
                 {!details.string_filters && details.filters && Array.isArray(details.filters) && details.filters.map((f, i) => (
-                  <span key={i} style={{ background: 'rgba(59, 130, 246, 0.2)', color: '#93c5fd', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem', fontFamily: 'monospace' }}>
+                  <span key={i} className="px-2 py-0.5 rounded text-xs font-mono bg-primary/10 text-primary border border-primary/20">
                     {typeof f === 'string' ? f : JSON.stringify(f)}
                   </span>
                 ))}
@@ -477,11 +555,11 @@ const QueryDetails = ({ details }) => {
           )}
 
           {details.fields && (
-            <div style={{ marginBottom: '12px' }}>
-              <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Fields</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+            <div>
+              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Fields</div>
+              <div className="flex flex-wrap gap-1">
                 {details.fields.map((field, i) => (
-                  <span key={i} style={{ background: 'rgba(255, 255, 255, 0.1)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.8rem', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>
+                  <span key={i} className="px-1.5 py-0.5 rounded text-xs font-mono bg-muted text-muted-foreground">
                     {field}
                   </span>
                 ))}
@@ -491,8 +569,8 @@ const QueryDetails = ({ details }) => {
 
           {details.sql && (
             <div>
-              <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '4px' }}>SQL</div>
-              <pre style={{ background: '#1e1e1e', padding: '8px', borderRadius: '4px', overflowX: 'auto', fontSize: '0.75rem', color: '#d4d4d4', margin: 0 }}>
+              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">SQL</div>
+              <pre className="p-2 rounded bg-muted font-mono text-xs overflow-x-auto text-foreground whitespace-pre-wrap break-all">
                 {details.sql}
               </pre>
             </div>
@@ -501,8 +579,8 @@ const QueryDetails = ({ details }) => {
           {/* Fallback for sql on top level if strictly following the user json blob structure where sql is outside query_details but maybe passed in prop combined */}
           {!details.sql && details._sql_fallback && (
             <div>
-              <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-secondary)', marginBottom: '4px' }}>SQL</div>
-              <pre style={{ background: '#1e1e1e', padding: '8px', borderRadius: '4px', overflowX: 'auto', fontSize: '0.75rem', color: '#d4d4d4', margin: 0 }}>
+              <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">SQL</div>
+              <pre className="p-2 rounded bg-muted font-mono text-xs overflow-x-auto text-foreground whitespace-pre-wrap break-all">
                 {details._sql_fallback}
               </pre>
             </div>
@@ -748,7 +826,6 @@ function App() {
       try {
         setEmbedError(null);
         setSignedUrl(null);
-        setEmbedSession(null);
 
         // Get user email from stored session or fetch from Google
         let userEmail = null;
@@ -946,6 +1023,21 @@ function App() {
       let buffer = ''
       let showChartRequested = false // Track explicit chart requests
 
+      // Detect chart request from user message (frontend-side detection for reliability)
+      const userMsgLower = userMessage.toLowerCase();
+      const chartKeywords = ['chart', 'graph', 'plot', 'visualize', 'visualization', 'bar chart', 'pie chart', 'line chart', 'scatter', 'area chart'];
+      if (chartKeywords.some(k => userMsgLower.includes(k))) {
+        showChartRequested = true;
+        console.log('Chart request detected from user message');
+      }
+
+      // Determine requested chart type from user message
+      let requestedChartType = 'bar'; // default
+      if (userMsgLower.includes('pie')) requestedChartType = 'pie';
+      else if (userMsgLower.includes('line')) requestedChartType = 'line';
+      else if (userMsgLower.includes('scatter')) requestedChartType = 'scatter';
+      else if (userMsgLower.includes('area')) requestedChartType = 'area';
+
       // Debug: Track parsed chunks
       const parsedChunks = []
 
@@ -1048,6 +1140,9 @@ function App() {
               }
               return newMessages
             })
+          } else if (line.includes('<tool_code>') || line.includes('</tool_code>')) {
+            // Filter out internal tool execution tags
+            continue;
           } else {
             // Check for JSON DATA lines
             if (line.startsWith('DATA: {')) {
@@ -1107,10 +1202,25 @@ function App() {
                   })
                   continue
                 } else if (jsonContent.type === 'json_chart') {
-                  // Treat specific chart event as a signal to show chart
+                  // API v2 returns Vega-Lite config for fast mode charts
+                  const config = jsonContent.config;
+
+                  if (config && config.vega_config) {
+                    // Store Vega config directly for native rendering
+                    setMessages(prev => {
+                      const newMessages = [...prev]
+                      const lastMsg = newMessages[newMessages.length - 1]
+                      if (lastMsg.role === 'agent') {
+                        lastMsg.vegaConfig = config.vega_config;
+                      }
+                      return newMessages
+                    })
+                    continue;
+                  }
+
+                  // Fallback: Treat as signal to generate Chart.js chart from tableData
                   showChartRequested = true;
 
-                  // Trigger chart generation logic - search for tableData in recent messages
                   setMessages(prev => {
                     const newMessages = [...prev]
                     const lastMsg = newMessages[newMessages.length - 1]
@@ -1134,7 +1244,7 @@ function App() {
 
                         if (dimension && metric) {
                           lastMsg.chartConfig = {
-                            type: 'bar', // Default to bar for follow-up chart requests
+                            type: 'bar',
                             data: {
                               labels: rows.map(r => r[dimension.name]),
                               datasets: [{
@@ -1176,23 +1286,57 @@ function App() {
               showChartRequested = true;
               contentLine = contentLine.replace('SHOW_CHART', '').trim();
 
-              // If we received the signal BUT we already processed the table data (race condition),
-              // we need to trigger the chart generation now.
+              // Heuristic: Check user's last message for chart type preference
+              // We access the message that *initiated* this request, which is usually the last one in 'messages' before we added the placeholder (or we can just check 'userMessage' variable if available, but it's passed as arg)
+              // Actually, we can check 'messages' state indirectly via a check on the *last user message* in the state
+              // But inside this loop 'prev' is the latest state.
+
               setMessages(prev => {
                 const newMessages = [...prev]
                 const lastMsg = newMessages[newMessages.length - 1]
-                if (lastMsg.role === 'agent' && lastMsg.tableData && !lastMsg.chartConfig) {
-                  // We have data but no chart, and we just got the signal. Generate it!
-                  const fields = lastMsg.tableData.fields || []
-                  const rows = lastMsg.tableData.rows || []
 
-                  if (rows.length > 1) {
+                // Find last user message
+                let userRequest = "";
+                for (let i = newMessages.length - 1; i >= 0; i--) {
+                  if (newMessages[i].role === 'user') {
+                    userRequest = newMessages[i].content.toLowerCase();
+                    break;
+                  }
+                }
+
+                let requestedType = 'bar'; // default
+                if (userRequest.includes('pie')) requestedType = 'pie';
+                else if (userRequest.includes('line')) requestedType = 'line';
+                else if (userRequest.includes('scatter')) requestedType = 'scatter';
+                else if (userRequest.includes('area')) requestedType = 'area';
+
+                // Find the most recent message with tableData
+                let targetTableData = null;
+                // Check current msg first (in case data came in same stream)
+                if (lastMsg.role === 'agent' && lastMsg.tableData) {
+                  targetTableData = lastMsg.tableData;
+                } else {
+                  // Search backwards
+                  for (let i = newMessages.length - 1; i >= 0; i--) {
+                    if (newMessages[i].role === 'agent' && newMessages[i].tableData) {
+                      targetTableData = newMessages[i].tableData;
+                      break;
+                    }
+                  }
+                }
+
+                if (lastMsg.role === 'agent' && targetTableData && !lastMsg.chartConfig) {
+                  // We have data matching the request (either current or previous). Generate chart!
+                  const fields = targetTableData.fields || []
+                  const rows = targetTableData.rows || []
+
+                  if (rows.length >= 1) {
                     const dimension = fields.find(f => f.name.includes('date') || f.name.includes('month') || f.name.includes('name'))
                     const metric = fields.find(f => !f.name.includes('date') && !f.name.includes('month') && !f.name.includes('name'))
 
                     if (dimension && metric) {
                       lastMsg.chartConfig = {
-                        type: fields.length > 2 ? 'bar' : 'line',
+                        type: requestedType,
                         data: {
                           labels: rows.map(r => r[dimension.name]),
                           datasets: [{
@@ -1200,7 +1344,8 @@ function App() {
                             data: rows.map(r => r[metric.name]),
                             backgroundColor: 'rgba(53, 162, 235, 0.5)',
                             borderColor: 'rgb(53, 162, 235)',
-                            borderWidth: 1
+                            borderWidth: 1,
+                            fill: requestedType === 'area'
                           }]
                         },
                         options: {
@@ -1231,6 +1376,80 @@ function App() {
             })
           }
         }
+      }
+
+      // After stream completes: If chart was requested but no chart generated, create one from recent data
+      if (showChartRequested) {
+        setMessages(prev => {
+          const newMessages = [...prev];
+          const lastMsg = newMessages[newMessages.length - 1];
+
+          if (lastMsg.role === 'agent' && !lastMsg.chartConfig) {
+            // Find most recent tableData from any message
+            let tableData = null;
+            for (let i = newMessages.length - 1; i >= 0; i--) {
+              if (newMessages[i].tableData) {
+                tableData = newMessages[i].tableData;
+                break;
+              }
+            }
+
+            if (tableData) {
+              console.log('Generating chart from previous tableData');
+              const fields = tableData.fields || [];
+              const rows = tableData.rows || [];
+
+              if (rows.length >= 1 && fields.length >= 2) {
+                // Find dimension (first field that looks like a category)
+                const dimension = fields.find(f =>
+                  f.name.includes('date') || f.name.includes('month') ||
+                  f.name.includes('name') || f.name.includes('country') ||
+                  f.name.includes('platform') || f.name.includes('category') ||
+                  f.name.includes('type') || f.name.includes('region')
+                ) || fields[0]; // fallback to first field
+
+                // Find metric (first numeric-looking field that's not the dimension)
+                const metric = fields.find(f =>
+                  f !== dimension &&
+                  (f.name.includes('count') || f.name.includes('sum') ||
+                    f.name.includes('total') || f.name.includes('revenue') ||
+                    f.name.includes('amount') || f.name.includes('avg') ||
+                    !f.name.includes('date') && !f.name.includes('name'))
+                ) || fields.find(f => f !== dimension); // fallback to second field
+
+                if (dimension && metric) {
+                  lastMsg.chartConfig = {
+                    type: requestedChartType,
+                    data: {
+                      labels: rows.map(r => r[dimension.name]),
+                      datasets: [{
+                        label: metric.label || metric.name,
+                        data: rows.map(r => r[metric.name]),
+                        backgroundColor: requestedChartType === 'pie'
+                          ? rows.map((_, i) => `hsla(${i * 45}, 70%, 50%, 0.7)`)
+                          : 'rgba(53, 162, 235, 0.5)',
+                        borderColor: requestedChartType === 'pie'
+                          ? rows.map((_, i) => `hsla(${i * 45}, 70%, 50%, 1)`)
+                          : 'rgb(53, 162, 235)',
+                        borderWidth: 1,
+                        fill: requestedChartType === 'area'
+                      }]
+                    },
+                    options: {
+                      responsive: true,
+                      plugins: {
+                        legend: { position: 'top' },
+                        title: { display: true, text: metric.label || metric.name }
+                      }
+                    }
+                  };
+                  console.log('Chart config generated:', lastMsg.chartConfig.type);
+                }
+              }
+            }
+          }
+          return newMessages;
+        });
       }
 
       // Finalize timings
@@ -1743,8 +1962,15 @@ function App() {
                   />
                 )}
 
-                {/* Auto-Generated Chart */}
-                {msg.chartConfig && (
+                {/* Vega Chart (from Fast Mode API v2) */}
+                {msg.vegaConfig && (
+                  <div className="mt-4 p-4 bg-background rounded-lg border">
+                    <VegaChartRenderer vegaConfig={msg.vegaConfig} />
+                  </div>
+                )}
+
+                {/* Chart.js Chart (from Deep/MCP mode or fallback) */}
+                {msg.chartConfig && !msg.vegaConfig && (
                   <div className="mt-4 p-4 bg-background rounded-lg border h-[300px]">
                     <ChartRenderer config={msg.chartConfig} />
                   </div>
@@ -1818,10 +2044,13 @@ function App() {
 
           {isLoading && (
             <div className="flex flex-col items-start">
-              <div className="bg-muted text-foreground relative max-w-[85%] rounded-lg p-3 text-sm shadow-sm flex items-center gap-3">
-                <Loader2 className="animate-spin text-primary" size={16} />
-                <span className="animate-pulse">{currentThought || (isLongQuery ? "Thinking..." : "Processing...")}</span>
-              </div>
+              <LiveThinkingPanel
+                thoughts={messages[messages.length - 1]?.thoughts || []}
+                currentThought={currentThought}
+                elapsedTime={messages[messages.length - 1]?.timings?.startTime
+                  ? (Date.now() - messages[messages.length - 1].timings.startTime) / 1000
+                  : undefined}
+              />
             </div>
           )}
           <div ref={messagesEndRef} />
@@ -1864,6 +2093,7 @@ function App() {
               placeholder="Query gaming data..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSubmit(e)}
               disabled={isLoading}
               className="flex-1"
             />

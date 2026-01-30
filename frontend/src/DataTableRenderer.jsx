@@ -4,6 +4,43 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { ChevronUp, ChevronDown } from 'lucide-react';
 import { LookerLink } from '@/components/LookerLink';
 
+// Format technical field names to human-readable labels
+// e.g., "events.number_of_users" → "Number of Users"
+const formatFieldName = (name) => {
+    if (!name) return '';
+    // Take the part after the last dot (e.g., "events.count" → "count")
+    const baseName = name.split('.').pop();
+    // Replace underscores with spaces and capitalize each word
+    return baseName
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
+// Format cell values based on type and content
+const formatCellValue = (value, fieldName) => {
+    if (value === null || value === undefined) return '—';
+
+    // Percentage fields
+    if (fieldName.includes('percent') || fieldName.includes('rate')) {
+        return `${(Number(value) * 100).toFixed(2)}%`;
+    }
+
+    // Numbers
+    if (typeof value === 'number') {
+        // Large integers: add comma separators
+        if (Number.isInteger(value)) {
+            return value.toLocaleString();
+        }
+        // Decimals: limit to 2 decimal places with separators
+        return value.toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+    }
+
+    return value;
+};
+
 const DataTableRenderer = ({ data, link, onLinkClick }) => {
     const [isExpanded, setIsExpanded] = useState(false);
 
@@ -55,23 +92,30 @@ const DataTableRenderer = ({ data, link, onLinkClick }) => {
                     <TableHeader>
                         <TableRow>
                             {data.fields.map((f, i) => (
-                                <TableHead key={i} className="h-8 text-xs px-4 bg-muted/20">{f.label}</TableHead>
+                                <TableHead key={i} className="h-8 text-xs px-4 bg-muted/20 font-semibold">
+                                    {f.label || formatFieldName(f.name)}
+                                </TableHead>
                             ))}
                         </TableRow>
                     </TableHeader>
                     <TableBody>
                         {displayRows.map((row, i) => (
-                            <TableRow key={i} className="hover:bg-muted/50">
-                                {data.fields.map((f, j) => (
-                                    <TableCell key={j} className="py-2 text-xs px-4">
-                                        {f.name.includes('percent') || f.name.includes('rate') ?
-                                            `${(Number(row[f.name]) * 100).toFixed(2)}%` :
-                                            (typeof row[f.name] === 'number' && !Number.isInteger(row[f.name])) ?
-                                                Number(row[f.name]).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) :
-                                                row[f.name]
-                                        }
-                                    </TableCell>
-                                ))}
+                            <TableRow
+                                key={i}
+                                className={`hover:bg-muted/50 ${i % 2 === 0 ? '' : 'bg-muted/20'}`}
+                            >
+                                {data.fields.map((f, j) => {
+                                    const value = row[f.name];
+                                    const isNumeric = typeof value === 'number';
+                                    return (
+                                        <TableCell
+                                            key={j}
+                                            className={`py-2 text-xs px-4 ${isNumeric ? 'text-right tabular-nums' : ''}`}
+                                        >
+                                            {formatCellValue(value, f.name)}
+                                        </TableCell>
+                                    );
+                                })}
                             </TableRow>
                         ))}
                     </TableBody>

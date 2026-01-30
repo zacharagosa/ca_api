@@ -302,6 +302,10 @@ def fast_query():
                     text_parts.append(content)
                     full_response_text += content + " "
                     yield f"DATA: {content}\n"
+                elif chunk_type == "thought":
+                    # API v2: Thinking/reasoning messages (text_type=2)
+                    # Stream as THOUGHT so frontend can show thinking process
+                    yield f"THOUGHT: {content}\n"
                 elif chunk_type == "data":
                     data_result = content
                     # Emit structured data for frontend to render table
