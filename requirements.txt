@@ -11,3 +11,4 @@ google-cloud-discoveryengine>=0.13.0
 numpy
 pyyaml
 looker_sdk
+google-cloud-spanner

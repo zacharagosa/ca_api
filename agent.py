@@ -35,13 +35,33 @@ def load_agent_config():
         with open(dataset_path, 'r') as f:
             dataset_config = yaml.safe_load(f) or {}
         print(f"INFO: Loaded dataset config: {dataset_path}")
-        dataset_instruction = dataset_config.get('instructions', '')
+        
+        # New split instructions
+        looker_inst = dataset_config.get('looker_instructions', '')
+        spanner_inst = dataset_config.get('spanner_instructions', '')
+        
+        # Backward compatibility
+        legacy_inst = dataset_config.get('instructions', '')
+        
+        if looker_inst or spanner_inst:
+            dataset_instruction = f"""
+### DATASET RULES
+
+**FOR ANALYTICS (Tool: get_insights)**:
+{looker_inst}
+
+**FOR GRAPH (Tool: query_spanner)**:
+{spanner_inst}
+"""
+        else:
+            dataset_instruction = legacy_inst
         
         # Expose dataset metadata
         config['_dataset'] = {
             'name': dataset_config.get('name', dataset_name),
             'display_name': dataset_config.get('display_name', dataset_name),
-            'looker': dataset_config.get('looker', {})
+            'looker': dataset_config.get('looker', {}),
+            'spanner': dataset_config.get('spanner', {})
         }
     except Exception as e:
         print(f"WARNING: Failed to load dataset config {dataset_path}: {e}")
@@ -69,6 +89,7 @@ def load_agent_config():
         'deep_mode': deep_final,
         'unified_agent': unified_final
     }
+    print("DEBUG: Final Deep Mode Instruction:\n", deep_final[:500] + "..." + deep_final[-500:])
     
     # Substitute placeholders in all computed instructions with actual Looker config values
     looker_config = config.get('_dataset', {}).get('looker', {})
@@ -127,6 +148,36 @@ auth_manager = AuthTokenManager()
 import vertexai
 from vertexai.preview import reasoning_engines
 from vertexai.generative_models import GenerativeModel, Tool, FunctionDeclaration, Part, ToolConfig
+import random
+
+def retry_api_call(func, retries=3, delay=1, backoff=2, jitter=0.1, error_msg="API call failed"):
+    """
+    Retries a function call with exponential backoff and jitter.
+    Useful for handling transient network errors or dropped connections.
+    """
+    last_exception = None
+    for attempt in range(retries + 1):
+        try:
+            return func()
+        except Exception as e:
+            last_exception = e
+            error_str = str(e)
+            # Check for fatal errors where retry assumes no value (e.g. invalid argument)
+            # But "connection" or "pool" errors are always worth retrying
+            is_connection_error = any(k in error_str for k in ["Connection", "RemoteDisconnected", "503", "504", "429", "Resource exhausted"])
+            
+            if not is_connection_error and attempt < retries:
+                # If it's NOT a clear connection error, we might still want to retry for unknown glitches,
+                # but maybe be more conservative? For now, we retry generic exceptions too as Vertex can be flaky.
+                pass
+
+            if attempt < retries:
+                sleep_time = (delay * (backoff ** attempt)) + (random.random() * jitter)
+                print(f"WARNING: {error_msg} (Attempt {attempt+1}/{retries}). Retrying in {sleep_time:.2f}s... Error: {error_str[:100]}...")
+                time.sleep(sleep_time)
+            
+    raise last_exception
+
 
 # Configuration - Load Looker config from dataset, with fallback to env vars
 dataset_looker = AGENT_CONFIG.get('_dataset', {}).get('looker', {})
@@ -140,6 +191,15 @@ LOOKER_CLIENT_SECRET = os.getenv(_client_secret_env) or os.getenv("LOOKER_CLIENT
 LOOKER_INSTANCE_URI = dataset_looker.get('instance_uri') or os.getenv("LOOKER_INSTANCE_URI")
 LOOKML_MODEL = dataset_looker.get('model') or os.getenv("LOOKML_MODEL", "gaming")
 EXPLORE = dataset_looker.get('explore') or os.getenv("EXPLORE", "events")
+
+# Spanner Config
+dataset_spanner = AGENT_CONFIG.get('_dataset', {}).get('spanner', {})
+SPANNER_PROJECT_ID = dataset_spanner.get('project_id')
+SPANNER_INSTANCE_ID = dataset_spanner.get('instance_id')
+SPANNER_DATABASE_ID = dataset_spanner.get('database_id')
+
+if SPANNER_INSTANCE_ID:
+    print(f"INFO: Spanner configured: {SPANNER_PROJECT_ID}/{SPANNER_INSTANCE_ID}/{SPANNER_DATABASE_ID}")
 
 print(f"INFO: Using Looker instance: {LOOKER_INSTANCE_URI}, model: {LOOKML_MODEL}, explore: {EXPLORE}")
 PROJECT_ID = os.getenv("PROJECT_ID", "1094200614711")
@@ -506,9 +566,163 @@ def fast_query(question: str, history: list = []):
                     messages=messages,
                 )
                 continue # Retry
-            else:
                 yield {"type": "error", "content": error_str}
                 break
+
+# Spanner Caching
+_cached_spanner_database = None
+
+def _get_cached_spanner_database():
+    global _cached_spanner_database
+    if _cached_spanner_database is None:
+        try:
+            log_debug("Initializing Spanner Connection...")
+            from google.cloud import spanner
+            client = spanner.Client(project=SPANNER_PROJECT_ID, credentials=auth_manager.get_credentials())
+            instance = client.instance(SPANNER_INSTANCE_ID)
+            _cached_spanner_database = instance.database(SPANNER_DATABASE_ID)
+            log_debug("Spanner Connection Initialized.")
+        except Exception as e:
+            log_debug(f"Spanner Connection Failed: {e}")
+            raise e
+    return _cached_spanner_database
+
+import queue
+
+# Global queue for side-channel data events (e.g., graph data from inside tools)
+# Must be initialized by the server/caller
+data_queue = None
+
+def query_spanner(sql: str):
+    """Executes a SQL or Graph Query Language (SQL/PGQ) query on the configured Spanner database.
+    
+    **CRITICAL TOOL SELECTION RULES:**
+    - **ALWAYS USE THIS TOOL** for questions about **CLANS**, **FRIENDS**, **SOCIAL CONNECTIONS**, or **ITEM TRADES**.
+    - **NEVER USE get_insights** for "Clan" or "Friend" questions. Looker does NOT have this data.
+    - If the user asks about "DragonSlayers" (a clan), you MUST use this tool.
+    
+    Args:
+        sql: The SQL or GQL query to execute.
+    
+    Returns:
+        A dictionary containing the query results (list of rows as dicts).
+    """
+    if not SPANNER_INSTANCE_ID or not SPANNER_DATABASE_ID:
+        return {"error": "Spanner is not configured for this dataset."}
+        
+    try:
+        t_start = time.time()
+        log_thought(f"Executing Spanner Query: {sql}")
+        
+        # Report query details via data_queue if available
+        if data_queue:
+            try:
+                data_queue.put({"type": "json_utils", "data": {"type": "query_details", "sql": sql, "source": "Spanner Graph"}})
+            except Exception:
+                pass
+        
+        database = _get_cached_spanner_database()
+        
+        with database.snapshot() as snapshot:
+            results = snapshot.execute_sql(sql)
+            
+            rows = []
+            columns = []
+            
+            for row in results:
+                row_dict = {}
+                if not columns and results.fields:
+                    columns = [f.name for f in results.fields]
+                
+                if columns:
+                    for i, val in enumerate(row):
+                        row_dict[columns[i]] = val
+                else:
+                    row_dict = {f"col_{i}": val for i, val in enumerate(row)}
+                
+                rows.append(row_dict)
+                
+        elapsed = time.time() - t_start
+        log_thought(f"Spanner Query returned {len(rows)} rows in {elapsed:.2f}s.")
+        
+        # Check for graph data and emit if present
+        graph_data = extract_graph_from_rows(rows)
+        if graph_data:
+            log_thought(f"Graph Data Detected: {len(graph_data['nodes'])} nodes, {len(graph_data['links'])} links")
+            if data_queue:
+                data_queue.put({"type": "graph", "content": graph_data})
+            else:
+                log_debug("Graph data detected but data_queue is not initialized. Visualization will not be sent.")
+
+        return {"data": rows}
+        
+    except Exception as e:
+        error_msg = f"Spanner Query Failed: {e}"
+        log_thought(error_msg)
+        return {"error": error_msg}
+
+
+def extract_graph_from_rows(rows):
+    """Heuristic to extract graph nodes/links from SQL rows."""
+    if not isinstance(rows, list) or not rows:
+        return None
+        
+    nodes = {}
+    links = []
+    
+    for row in rows:
+        # Standardize keys to lowercase for easier matching
+        row_lower = {k.lower(): v for k, v in row.items()}
+        
+        # Player-Friend (initiator_id -> acceptor_id)
+        if 'initiator_id' in row and 'acceptor_id' in row:
+            nodes[row['initiator_id']] = {'id': row['initiator_id'], 'group': 'Player', 'label': row.get('initiator_gamertag', row['initiator_id'])}
+            nodes[row['acceptor_id']] = {'id': row['acceptor_id'], 'group': 'Player', 'label': row.get('acceptor_gamertag', row['acceptor_id'])}
+            links.append({'source': row['initiator_id'], 'target': row['acceptor_id']})
+            
+        # Player-Clan (player_id -> clan_id)
+        elif 'player_id' in row and 'clan_id' in row:
+             nodes[row['player_id']] = {'id': row['player_id'], 'group': 'Player', 'label': row.get('gamertag', row['player_id'])}
+             nodes[row['clan_id']] = {'id': row['clan_id'], 'group': 'Clan', 'label': row.get('clan_name', row['clan_id'])}
+             links.append({'source': row['player_id'], 'target': row['clan_id']})
+             
+        # Player-Item (player_id -> item_id)
+        elif 'player_id' in row and 'item_id' in row:
+             nodes[row['player_id']] = {'id': row['player_id'], 'group': 'Player', 'label': row.get('gamertag', row['player_id'])}
+             nodes[row['item_id']] = {'id': row['item_id'], 'group': 'Item', 'label': row.get('item_name', row['item_id'])}
+             links.append({'source': row['player_id'], 'target': row['item_id']})
+
+        # Name-based Extraction (Fallback if IDs are missing but names are present)
+        # Clan Name <-> Gamertag/Player Name
+        elif 'clan_name' in row_lower and ('gamertag' in row_lower or 'player_name' in row_lower):
+            clan_name = row_lower['clan_name']
+            player_name = row_lower.get('gamertag') or row_lower.get('player_name')
+            
+            if clan_name and player_name:
+                # Use names as IDs if real IDs are missing, but prefix them to avoid collisions
+                clan_id = f"clan:{clan_name}"
+                player_id = f"player:{player_name}"
+                
+                nodes[clan_id] = {'id': clan_id, 'group': 'Clan', 'label': clan_name}
+                nodes[player_id] = {'id': player_id, 'group': 'Player', 'label': player_name}
+                links.append({'source': player_id, 'target': clan_id})
+
+        # Friend Gamertag <-> Gamertag
+        elif 'gamertag' in row_lower and 'friend_gamertag' in row_lower:
+            p1 = row_lower['gamertag']
+            p2 = row_lower['friend_gamertag']
+            
+            if p1 and p2:
+                id1 = f"player:{p1}"
+                id2 = f"player:{p2}"
+                nodes[id1] = {'id': id1, 'group': 'Player', 'label': p1}
+                nodes[id2] = {'id': id2, 'group': 'Player', 'label': p2}
+                links.append({'source': id1, 'target': id2})
+    
+    if not nodes and not links:
+        return None
+        
+    return {'nodes': list(nodes.values()), 'links': links}
 
 
 def get_insights(question: str):
@@ -587,7 +801,13 @@ def get_insights(question: str):
     # Make the request
     try:
         log_thought("Querying Looker data...")
-        stream = data_chat_client.chat(request=request)
+        # stream = data_chat_client.chat(request=request)
+        stream = retry_api_call(
+            lambda: data_chat_client.chat(request=request),
+            retries=3,
+            delay=2,
+            error_msg="Looker Data Chat query failed"
+        )
     except Exception as e:
         log_thought(f"Error querying data: {e}")
         raise e
@@ -778,6 +998,27 @@ def run_deep_analysis(question: str):
     analysis_tools = Tool(
         function_declarations=[get_insights_func]
     )
+    
+    # Add Spanner tool if configured
+    if SPANNER_INSTANCE_ID:
+        query_spanner_func = FunctionDeclaration(
+            name="query_spanner",
+            description="Executes a SQL/GQL query on the Spanner Graph database (Players, Clans, Items).",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "sql": {
+                        "type": "string",
+                        "description": "The SQL or Graph query to execute."
+                    }
+                },
+                "required": ["sql"]
+            }
+        )
+        analysis_tools = Tool(
+            function_declarations=[get_insights_func, query_spanner_func]
+        )
+        print("INFO: Added query_spanner tool to Deep Mode.")
 
     # Initialize the model
     model = GenerativeModel(
@@ -785,6 +1026,7 @@ def run_deep_analysis(question: str):
         tools=[analysis_tools],
         tool_config=ToolConfig(
             function_calling_config=ToolConfig.FunctionCallingConfig(
+                mode=ToolConfig.FunctionCallingConfig.Mode.AUTO
             )
         ),
         system_instruction=AGENT_CONFIG.get('_computed', {}).get('deep_mode', "You are a Senior Data Analyst."),
@@ -794,7 +1036,13 @@ def run_deep_analysis(question: str):
     
     try:
         t0 = time.time()
-        response = chat.send_message(question)
+        # response = chat.send_message(question)
+        response = retry_api_call(
+            lambda: chat.send_message(question),
+            retries=3,
+            delay=2,
+            error_msg="Deep Analysis initial chat failed"
+        )
         log_thought(f"Initial Plan Generated in {time.time() - t0:.2f}s")
         
         # Loop for tool calls (max 5 turns to prevent infinite loops)
@@ -829,6 +1077,9 @@ def run_deep_analysis(question: str):
                                 question_arg = list(fn.args.values())[0] if fn.args else ""
                                 
                             futures.append(executor.submit(get_insights, question_arg))
+                        elif fn.name == "query_spanner":
+                             sql_arg = fn.args.get("sql")
+                             futures.append(executor.submit(query_spanner, sql_arg))
                         else:
                             log_debug(f"Unknown tool: {fn.name}")
                             futures.append(None) # Handle unknown tools if necessary
@@ -846,6 +1097,10 @@ def run_deep_analysis(question: str):
                                         response={"content": result}
                                     )
                                 )
+                                
+                                # Graph data and query details are now emitted directly by query_spanner 
+                                # via the global data_queue, so we don't need to do it here.
+                                       
                             except Exception as e:
                                 tool_responses.append(
                                     Part.from_function_response(
@@ -859,7 +1114,13 @@ def run_deep_analysis(question: str):
                 
                 log_thought("Synthesizing findings...")
                 t_synth = time.time()
-                response = chat.send_message(tool_responses)
+                # response = chat.send_message(tool_responses)
+                response = retry_api_call(
+                    lambda: chat.send_message(tool_responses),
+                    retries=3,
+                    delay=2,
+                    error_msg="Deep Analysis synthesis step failed"
+                )
                 log_thought(f"Synthesis/Next Step Generated in {time.time() - t_synth:.2f}s")
                 
             elif text_parts:
@@ -975,6 +1236,7 @@ unified_agent = Agent(
     instruction=AGENT_CONFIG.get('_computed', {}).get('unified_agent', """You are an expert mobile gaming data analyst..."""),
     tools=[
         get_insights,
+        query_spanner,
         perform_deep_analysis,
 
         # Wrap the sub-agent as a tool
@@ -1040,6 +1302,24 @@ mcp_app = None
 # vertexai.init is moved to the entry point (chat.py or deploy.py)
 # to avoid hardcoding the staging bucket in the remote environment.
 
+class DeepAnalysisApp:
+    """
+    Wrapper for Deep Analysis mode to function as an App for server.py.
+    Bypasses the Unified Agent router for lower latency.
+    """
+    def stream_query(self, message: str, user_id: str = None, session_id: str = None):
+        # Directly invoke the generator
+        return run_deep_analysis(message)
+
+    def get_session(self, *args, **kwargs):
+        pass
+
+    def create_session(self, *args, **kwargs):
+        pass
+
+deep_app = DeepAnalysisApp()
+
+
 # Create the main App (unified agent)
 try:
     app = reasoning_engines.AdkApp(
@@ -1059,4 +1339,6 @@ def get_agent_app(agent_type="fast"):
     """Returns the appropriate agent app based on type."""
     if agent_type == "mcp" and mcp_app:
         return mcp_app
+    elif agent_type == "deep":
+        return deep_app
     return app

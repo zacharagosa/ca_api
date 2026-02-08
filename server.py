@@ -109,6 +109,9 @@ def chat():
         # Queue for agent response chunks
         response_queue = queue.Queue()
         
+        # Initialize the global data queue for side-channel events
+        agent.data_queue = queue.Queue()
+        
         # Extract token
         auth_header = request.headers.get('Authorization')
         access_token = None
@@ -126,7 +129,10 @@ def chat():
                 if agent_type == 'mcp':
                     # MCP agent handles the request directly
                     pass
-                elif deep_analysis or agent_type == 'deep':
+                elif agent_type == 'deep':
+                    # Direct routing to Deep Analysis App
+                    final_input = user_input
+                elif deep_analysis:
                     final_input = f"Instruction: PERFORM_DEEP_ANALYSIS. Question: {user_input}"
                 else:
                     final_input = f"Instruction: FAST_RESPONSE. Question: {user_input}"
@@ -196,6 +202,17 @@ def chat():
                 except queue.Empty:
                     pass
 
+                # Check for side-channel data events (e.g. Graph, SQL logs)
+                try:
+                    while True:
+                        data_event = agent.data_queue.get_nowait()
+                        if data_event.get("type") == "graph":
+                             yield f"DATA: {json.dumps({'type': 'json_graph', 'graphData': data_event['content']})}\n"
+                        elif data_event.get("type") == "json_utils":
+                             yield f"DATA: {json.dumps(data_event['data'])}\n"
+                except queue.Empty:
+                    pass
+
                 # Check for agent response
                 try:
                     # Wait a short time for response to allow thought loop to run frequently
@@ -210,9 +227,15 @@ def chat():
                              yield f"DATA: {chunk.text}\n"
                         # Handle dictionary (legacy or deep analysis raw chunks if any)
                         elif isinstance(chunk, dict):
-                            if "content" in chunk:
+                            if chunk.get("type") == "graph":
+                                # Stream graph data to frontend
+                                yield f"DATA: {json.dumps({'type': 'json_graph', 'graphData': chunk['content']})}\n"
+                            elif "content" in chunk:
                                 content = chunk["content"]
-                                if "parts" in content:
+                                # Check for generic JSON utils (e.g. query details)
+                                if isinstance(content, dict) and content.get("type") == "json_utils":
+                                    yield f"DATA: {json.dumps(content['data'])}\n"
+                                elif "parts" in content:
                                     for part in content["parts"]:
                                         if "text" in part:
                                             yield f"DATA: {part['text']}\n"
@@ -228,7 +251,7 @@ def chat():
                         break
                 except queue.Empty:
                     # If agent is still running, continue loop to check thoughts again
-                    if not agent_thread.is_alive() and response_queue.empty() and agent.thought_queue.empty():
+                    if not agent_thread.is_alive() and response_queue.empty() and agent.thought_queue.empty() and agent.data_queue.empty():
                          break
                     continue
         

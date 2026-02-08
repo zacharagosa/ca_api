@@ -12,6 +12,11 @@ const VegaChartRenderer = ({ vegaConfig, width = 'container', height = 250 }) =>
     const spec = useMemo(() => {
         if (!vegaConfig) return null;
 
+        // Basic validation - must have minimal Vega-Lite properties
+        // If it's an empty object or lacks visual definitions, don't render
+        const hasVisuals = vegaConfig.mark || vegaConfig.layer || vegaConfig.concat || vegaConfig.vconcat || vegaConfig.hconcat;
+        if (!hasVisuals) return null;
+
         return {
             $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
             width: width,

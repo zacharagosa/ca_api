@@ -18,6 +18,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import DataTableRenderer from './DataTableRenderer';
 import { LookerLink } from '@/components/LookerLink';
 import VegaChartRenderer from '@/components/VegaChartRenderer';
+import GraphRenderer from '@/components/GraphRenderer';
 
 ChartJS.register(
   CategoryScale,
@@ -591,6 +592,65 @@ const QueryDetails = ({ details }) => {
   );
 };
 
+const AgentInfoModal = ({ isOpen, onClose }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm animate-in fade-in-0">
+      <div className="relative w-full max-w-lg rounded-lg border bg-card p-6 shadow-lg animate-in fade-in-0 zoom-in-95">
+        <div className="flex flex-col space-y-1.5 text-center sm:text-left mb-4">
+          <h2 className="text-lg font-semibold leading-none tracking-tight">Agent Capabilities</h2>
+          <p className="text-sm text-muted-foreground">
+            Choose the right agent for your analysis needs.
+          </p>
+        </div>
+
+        <div className="grid gap-4 py-4">
+          <div className="flex items-start gap-4 rounded-md border p-4 bg-muted/50">
+            <Zap className="mt-1 h-5 w-5 text-amber-500 shrink-0" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium leading-none">Fast Agent</p>
+              <p className="text-sm text-muted-foreground">
+                Best for real-time simple queries, checking specific metrics, or pulling raw data tables.
+                <br />
+                <span className="text-xs italic">Example: "What is the DAU for last week?"</span>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-4 rounded-md border p-4 bg-muted/50">
+            <Brain className="mt-1 h-5 w-5 text-purple-500 shrink-0" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium leading-none">Deep Agent</p>
+              <p className="text-sm text-muted-foreground">
+                Performs complex multi-step reasoning, root cause analysis, and cross-comparisons.
+                <br />
+                <span className="text-xs italic">Example: "Why did retention drop on iOS yesterday?"</span>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-4 rounded-md border p-4 bg-muted/50">
+            <Code className="mt-1 h-5 w-5 text-blue-500 shrink-0" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium leading-none">MCP Agent</p>
+              <p className="text-sm text-muted-foreground">
+                Access advanced tools for dashboard management, LookML analysis, and system health checks.
+                <br />
+                <span className="text-xs italic">Example: "Create a new dashboard for user acquisition."</span>
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end mt-4">
+          <Button onClick={onClose}>Close</Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 function App() {
   const [messages, setMessages] = useState([
     { role: 'agent', content: 'Hello! I am your mobile gaming data analyst. How can I help you today?' }
@@ -604,6 +664,7 @@ function App() {
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [agentType, setAgentType] = useState('fast') // 'fast', 'deep', or 'mcp'
+  const [isInfoModalOpen, setIsInfoModalOpen] = useState(false)
   const [isLongQuery, setIsLongQuery] = useState(false);
   const messagesEndRef = useRef(null)
   // Generate a unique session ID when the component mounts
@@ -1269,6 +1330,16 @@ function App() {
                     return newMessages
                   })
                   continue
+                } else if (jsonContent.type === 'json_graph') {
+                  setMessages(prev => {
+                    const newMessages = [...prev]
+                    const lastMsg = newMessages[newMessages.length - 1]
+                    if (lastMsg.role === 'agent') {
+                      lastMsg.graphData = jsonContent.graphData;
+                    }
+                    return newMessages
+                  })
+                  continue
                 }
               } catch (e) {
                 // Not JSON, treat as text
@@ -1714,6 +1785,15 @@ function App() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => setIsInfoModalOpen(true)}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              <Info size={16} />
+              <span>Agent Info</span>
+            </Button>
             <button
               onClick={logout}
               title="Logout"
@@ -1976,6 +2056,13 @@ function App() {
                   </div>
                 )}
 
+                {/* Graph Analytics Renderer */}
+                {msg.graphData && (
+                  <div className="mt-4 p-4 bg-background rounded-lg border h-[500px]">
+                    <GraphRenderer data={msg.graphData} />
+                  </div>
+                )}
+
                 {!msg.tableData && msg.link && (
                   <div className="mt-2 text-right">
                     <LookerLink url={msg.link} onLinkClick={handleLookerLinkClick} />
@@ -2058,7 +2145,16 @@ function App() {
 
         <footer className="border-t bg-background p-4 flex flex-col gap-2">
           {/* Agent Mode Toggle */}
-          <div className="flex justify-center gap-1 mb-2">
+          <div className="flex justify-center gap-1 mb-2 items-center">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setIsInfoModalOpen(true)}
+              className="h-7 w-7 mr-2 shrink-0"
+              title="Agent Info"
+            >
+              <Info size={14} />
+            </Button>
             <Button
               variant={agentType === 'fast' ? "default" : "secondary"}
               size="sm"
@@ -2110,6 +2206,7 @@ function App() {
         </footer>
 
       </aside>
+      <AgentInfoModal isOpen={isInfoModalOpen} onClose={() => setIsInfoModalOpen(false)} />
     </div >
   )
 }

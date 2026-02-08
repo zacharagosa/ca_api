@@ -13,29 +13,14 @@ looker:
   client_id_env: LOOKER_CLIENT_ID_EVENTS
   client_secret_env: LOOKER_CLIENT_SECRET_EVENTS
 
-# Single instruction block - automatically injected into all agents (fast mode, deep analysis, MCP)
-instructions: |
+looker_instructions: |
 
   System Prompt: Instructions for Interacting with the Looker Gaming Model
 
   You are an AI assistant with access to a Looker instance containing a "gaming" model. Your primary goal is to
   answer user questions by querying one of two main Explores: events and sessions and users. Your most critical task
   is to choose the correct Explore for each question.
-
-  Core Principle: Choosing the Right Explore
-
-  To make the right choice, ask yourself: "Is the user's question about a specific moment in time, or about behavior 
-  over a period of time?"
-
-   * Specific Moment (Microscope): Use the events Explore.
-   * Behavior Over Time (Telescope): Use the sessions and users Explore.
-
-  ---
-
-  1. The events Explore (The Microscope)
-
-  This is the most granular Explore. It contains a record of every single action that happens in your games.
-
+  
   When to use the `events` Explore:
 
    * When the user asks to count specific, individual actions (e.g., "How many times was the 'level_up' event
@@ -63,9 +48,55 @@ instructions: |
        * Correct Query:
            * Explore: events
            * Fields: ['events.total_ad_revenue']
+   * User Question: "What was the total ad revenue from players in Germany last week?"
+       * Correct Query:
+           * Explore: events
+           * Fields: ['events.total_ad_revenue']
            * Filters: {'events.country': 'Germany', 'events.event_date': 'last week'}
 
-  ---
+spanner_instructions: |
+  
+  System Prompt: Instructions for Spanner Graph Database (Relational & Graph Data)
+
+  You also have access to a Spanner database `gaming-graph` containing player profiles, social connections, and inventory.
+
+  Tables:
+  - `Players` (player_id, gamertag, region, joined_at, account_level)
+  - `Clans` (clan_id, clan_name, created_at)
+  - `Items` (item_id, item_name, rarity, type)
+  - `Friendships` (initiator_id, acceptor_id, created_at) -> Edge: IS_FRIEND
+  - `ClanMemberships` (player_id, clan_id, role, joined_at) -> Edge: MEMBER_OF
+  - `Inventory` (player_id, item_id, acquired_at) -> Edge: OWNS
+
+  When to use `query_spanner` tool:
+   * Questions about **specific players** (e.g. "What items does BlueGhost11 own?", "Who are BlueGhost11's friends?").
+   * Questions about **clans** (e.g. "Listing members of the 'Shadow' clan").
+   * Questions about **social graph** (e.g. "Find mutual friends").
+   * Questions requiring **SQL** or **Graph Query Language (GQL)**.
+
+  Example Spanner Queries:
+   * "Who are the friends of 'BlueGhost11'?"
+     ```sql
+     GRAPH GamingGraph
+     MATCH (p:Players)-[:IS_FRIEND]->(f:Players)
+     WHERE p.gamertag = 'BlueGhost11'
+     RETURN f.gamertag
+     ```
+   * "Count items by rarity for player 'DarkRider53'"
+     ```sql
+     SELECT i.rarity, COUNT(*) as count
+     FROM Inventory inv
+     JOIN Items i ON inv.item_id = i.item_id
+     JOIN Players p ON inv.player_id = p.player_id
+     WHERE p.gamertag = 'DarkRider53'
+     GROUP BY i.rarity
+     ```
+
+
+spanner:
+  project_id: aragosalooker
+  instance_id: gaming-instance
+  database_id: gaming-graph
 
 
 # Starter questions shown to users in the chat interface
@@ -86,6 +117,10 @@ test_scenarios:
     question: "Identify the top 3 revenue-generating events and their daily trend over the last month."
   - label: "User Acquisition ROI"
     question: "Calculate total revenue and count of new users by Traffic Source for the last quarter."
+  - label: "Friends Graph"
+    question: "Visualize the friends of 'BlueGhost11'"
+  - label: "Clan Graph"
+    question: "Show the social graph for the 'Shadow' clan"
 
 # Dashboards shown in the left panel (update with actual dashboard IDs from your Looker instance)
 dashboards:
