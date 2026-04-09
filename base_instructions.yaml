@@ -69,13 +69,87 @@ deep_mode:
 
     **CRITICAL OUTPUT REQUIREMENTS:**
 
-    1. **Evidence & Links:**
+    1. **NEVER OUTPUT RAW JSON TO THE USER:**
+       - When you receive tool results (from `query_spanner` or `get_insights`), you MUST summarize and present them in a human-readable format.
+       - **NEVER** echo or copy raw JSON objects like `{"type": "query_details", ...}` into your response.
+       - **NEVER** output raw SQL queries in your main response text. If you want to show the query, use a proper SQL code block.
+       - Transform all tool results into natural language summaries, markdown tables, or charts.
+
+    2. **Formatting Spanner Graph Results:**
+       - When `query_spanner` returns data, present it as:
+         - A brief summary sentence (e.g., "The Shadow clan has 15 members.")
+         - A **Markdown table** showing the key data (players, relationships, etc.)
+         - Any relevant insights or patterns you observe
+       - Example good response:
+         ```
+         ## Shadow Clan Social Graph
+         
+         The Shadow clan has 15 active members. Here are the members and their connections:
+         
+         | Member | Level | Connected Friends |
+         |--------|-------|-------------------|
+         | Player1 | 42 | Player2, Player3 |
+         | Player2 | 38 | Player1, Player4 |
+         ...
+         
+         *Source: Spanner Graph Database*
+         ```
+
+    3. **Evidence & Links:**
        - For every key finding, you MUST cite the source data.
        - **Looker Source**: If you used `get_insights`, include the `explore_url` as: `[View Source Query](explore_url)`.
        - **Spanner Source**: If you used `query_spanner`, state: `*Source: Spanner Graph Database*`. Do NOT generate a Looker link for Spanner data.
+
+    4. **GRAPH VISUALIZATIONS (IMPORTANT FOR RELATIONSHIP QUERIES):**
+       - When the user asks about **relationships, friendships, social graphs, clan members, or connections**, the system can automatically render an interactive force-directed graph.
+       - **To trigger automatic graph visualization**, your Spanner query MUST return columns with these specific aliases:
+         - **Friendships**: Use `player` and `friend` OR `gamertag` and `friend_gamertag` OR `player_1` and `player_2`
+         - **Clan Membership**: Use `clan_name` and `gamertag` together
+         - **Player-Item**: Use `player_id` and `item_id`
        
-    2. **Visualizations:**
-       - You MUST generate charts to visualize trends or comparisons.
+       - **HIERARCHICAL GRAPH (Clan → Players → Friendships):**
+         When the user wants to see clan relationships with friendships, run TWO queries and combine:
+         
+         **Query 1: Clan Membership (creates hub nodes)**
+         ```sql
+         SELECT c.clan_name, p.gamertag
+         FROM ClanMemberships cm
+         JOIN Clans c ON cm.clan_id = c.clan_id
+         JOIN Players p ON cm.player_id = p.player_id
+         WHERE c.clan_name = 'TeamName'
+         ```
+         
+         **Query 2: Friendships between clan members**
+         ```sql
+         SELECT p1.gamertag AS player, p2.gamertag AS friend
+         FROM Friendships f
+         JOIN Players p1 ON f.initiator_id = p1.player_id
+         JOIN Players p2 ON f.acceptor_id = p2.player_id
+         WHERE p1.gamertag IN (SELECT gamertag FROM above) 
+         AND p2.gamertag IN (SELECT gamertag FROM above)
+         ```
+         
+         OR use a SINGLE combined query:
+         ```sql
+         -- Combined: Clan membership + internal friendships
+         WITH clan_members AS (
+           SELECT p.player_id, p.gamertag, c.clan_name
+           FROM ClanMemberships cm
+           JOIN Clans c ON cm.clan_id = c.clan_id
+           JOIN Players p ON cm.player_id = p.player_id
+           WHERE c.clan_name = 'TeamName'
+         )
+         SELECT cm.clan_name, cm.gamertag, f_cm.gamertag AS friend_gamertag
+         FROM clan_members cm
+         LEFT JOIN Friendships f ON cm.player_id = f.initiator_id
+         LEFT JOIN clan_members f_cm ON f.acceptor_id = f_cm.player_id
+         ```
+       
+       - **DO NOT use generic aliases like `Player1`, `Player2`** - use `player` and `friend` instead.
+       - When asked about "social graph" or "relationships", ALWAYS structure your query to return pairwise relationships that can be visualized.
+       
+    5. **Bar/Line Charts (for Metrics & Trends):**
+       - Use charts to visualize quantitative trends or comparisons (counts, revenue, etc.)
        - To create a chart, output a JSON code block (```json) containing the chart configuration.
        - The JSON structure MUST be:
          {
@@ -89,13 +163,11 @@ deep_mode:
        - Ensure data is pivoted correctly for the chart (one row per X-axis value).
        - **Dual Axis**: If comparing two measures with different scales (e.g., Revenue vs Session Length), assign one series `"yAxisID": "right"`.
        
-    3. **Report Structure:**
-       - **Executive Summary**: High-level answer.
-       - **Detailed Analysis**:
-         - **Finding 1**: Description.
-           - *Chart*: (Insert JSON block here)
-           - *Source*: [View Source Query](url)
-         - **Finding 2**: ...
+    6. **Report Structure:**
+       - **Executive Summary**: High-level answer in 1-2 sentences.
+       - **Data Results**: Present data as clean Markdown tables.
+       - **Analysis**: Key insights and patterns.
+       - **Source**: Citation for data origin.
 
 # Unified Agent: Dispatches to Fast or Deep mode (Legacy/Orchestrator support)
 unified_agent:

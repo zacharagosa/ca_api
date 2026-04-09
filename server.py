@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, Response, stream_with_context, redire
 import json
 import time
 import os
+import re
 
 from flask_cors import CORS
 from agent import app as agent_app, PROJECT_ID, LOCATION
@@ -17,6 +18,36 @@ import binascii
 from struct import pack
 agent.thought_queue = queue.Queue()
 from cache_manager import cache_manager
+
+# Helper: Filter raw query_details JSON from agent text responses
+# This catches cases where the model accidentally outputs raw JSON blobs
+def filter_raw_json_from_text(text: str) -> str:
+    """Remove raw query_details JSON blobs from text output."""
+    if not text:
+        return text
+    
+    # Check if the entire text is just JSON blobs (common case for this bug)
+    # Multiple JSON objects look like: {...} {...} {...}
+    stripped = text.strip()
+    if stripped.startswith('{"type":') and '"query_details"' in stripped:
+        # The entire text is JSON blobs - return empty
+        return ""
+    
+    # Pattern to match query_details JSON objects (with DOTALL to match across newlines)
+    # Uses non-greedy matching and looks for the closing pattern
+    pattern = r'\{"type":\s*"query_details".*?"source":\s*"[^"]*"\s*\}'
+    filtered = re.sub(pattern, '', text, flags=re.DOTALL)
+    
+    # Also try to filter consecutive JSON objects that start with {"type":
+    # This catches any remaining {"type": ..., "sql": ..., "source": ...} patterns
+    pattern2 = r'\{"type":\s*"[^"]*",\s*"sql":.*?"source":\s*"[^"]*"\s*\}'
+    filtered = re.sub(pattern2, '', filtered, flags=re.DOTALL)
+    
+    # Clean up any excessive whitespace left behind
+    filtered = re.sub(r'\n{3,}', '\n\n', filtered)
+    filtered = re.sub(r'^\s+', '', filtered)  # Leading whitespace
+    
+    return filtered.strip()
 
 # Vertex AI is initialized in agent.py to ensure it is configured before agent creation.
 
@@ -198,7 +229,9 @@ def chat():
                 try:
                     while True:
                         thought = agent.thought_queue.get_nowait()
-                        yield f"THOUGHT: {thought}\n"
+                        # Sanitize thought to be single line
+                        safe_thought = str(thought).replace('\n', ' ')
+                        yield f"THOUGHT: {safe_thought}\n"
                 except queue.Empty:
                     pass
 
@@ -209,7 +242,11 @@ def chat():
                         if data_event.get("type") == "graph":
                              yield f"DATA: {json.dumps({'type': 'json_graph', 'graphData': data_event['content']})}\n"
                         elif data_event.get("type") == "json_utils":
-                             yield f"DATA: {json.dumps(data_event['data'])}\n"
+                             inner_data = data_event.get('data', {})
+                             # Skip query_details - these should not be displayed as text
+                             if isinstance(inner_data, dict) and inner_data.get("type") == "query_details":
+                                 continue
+                             yield f"DATA: {json.dumps(inner_data)}\n"
                 except queue.Empty:
                     pass
 
@@ -224,7 +261,10 @@ def chat():
                         chunk = data
                         # Handle ADK Agent Chunk object
                         if hasattr(chunk, 'text') and chunk.text:
-                             yield f"DATA: {chunk.text}\n"
+                             # Filter out any raw JSON that leaked through
+                             filtered_text = filter_raw_json_from_text(chunk.text)
+                             if filtered_text:
+                                 yield f"DATA: {filtered_text}\n"
                         # Handle dictionary (legacy or deep analysis raw chunks if any)
                         elif isinstance(chunk, dict):
                             if chunk.get("type") == "graph":
@@ -234,16 +274,30 @@ def chat():
                                 content = chunk["content"]
                                 # Check for generic JSON utils (e.g. query details)
                                 if isinstance(content, dict) and content.get("type") == "json_utils":
-                                    yield f"DATA: {json.dumps(content['data'])}\n"
+                                    inner_data = content.get('data', {})
+                                    # Skip query_details - these should not be displayed as text
+                                    # They're handled separately by the frontend
+                                    if isinstance(inner_data, dict) and inner_data.get("type") == "query_details":
+                                        continue
+                                    yield f"DATA: {json.dumps(inner_data)}\n"
                                 elif "parts" in content:
                                     for part in content["parts"]:
                                         if "text" in part:
-                                            yield f"DATA: {part['text']}\n"
+                                            # Filter out any raw JSON that leaked through
+                                            filtered_text = filter_raw_json_from_text(part['text'])
+                                            if filtered_text:
+                                                yield f"DATA: {filtered_text}\n"
                             elif "text" in chunk:
-                                yield f"DATA: {chunk['text']}\n"
+                                # Filter out any raw JSON that leaked through
+                                filtered_text = filter_raw_json_from_text(chunk['text'])
+                                if filtered_text:
+                                    yield f"DATA: {filtered_text}\n"
                         # Fallback for string
                         elif isinstance(chunk, str):
-                             yield f"DATA: {chunk}\n"
+                             # Filter out any raw JSON that leaked through
+                             filtered_text = filter_raw_json_from_text(chunk)
+                             if filtered_text:
+                                 yield f"DATA: {filtered_text}\n"
                     elif type_ == "done":
                         break
                     elif type_ == "error":

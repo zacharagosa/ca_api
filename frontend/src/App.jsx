@@ -809,6 +809,9 @@ function App() {
 
   const [embedError, setEmbedError] = useState(null);
 
+  // Expanded graph visualization state (shown in main content area)
+  const [expandedGraph, setExpandedGraph] = useState(null);
+
   const sidebarRef = useRef(null);
 
   // Ref to track resize state in event listeners without dependency issues
@@ -1103,19 +1106,19 @@ function App() {
       const parsedChunks = []
 
       while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
+        const { value, done } = await reader.read();
+        if (done) break;
 
-        buffer += decoder.decode(value, { stream: true })
+        const chunk = decoder.decode(value, { stream: true });
+        buffer += chunk;
 
-        // Process buffer line by line
-        const lines = buffer.split('\n')
-        // Keep the last partial line in the buffer
-        buffer = lines.pop() || ''
+        const lines = buffer.split('\n');
+        // Keep the last segment in the buffer as it might be incomplete
+        buffer = lines.pop();
 
-        for (const line of lines) {
-          // Don't skip empty lines as they might be important for markdown formatting (e.g. paragraph breaks)
-          // if (!line.trim()) continue 
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
 
           parsedChunks.push(line) // Log raw line
 
@@ -1140,25 +1143,30 @@ function App() {
               const newMessages = [...prev]
               const lastMsg = newMessages[newMessages.length - 1]
               if (lastMsg.role === 'agent') {
-                // Update timings
-                if (lastMsg.timings) {
-                  const steps = lastMsg.timings.steps;
-                  // Check for duplicate (same label as last step)
+                const updatedMsg = { ...lastMsg };
+
+                if (updatedMsg.timings) {
+                  const steps = [...(updatedMsg.timings.steps || [])];
                   const isDuplicate = steps.length > 0 && steps[steps.length - 1].label === thought;
 
                   if (!isDuplicate) {
                     if (steps.length > 0) {
-                      steps[steps.length - 1].duration = (now - steps[steps.length - 1].startTime) / 1000;
+                      steps[steps.length - 1] = {
+                        ...steps[steps.length - 1],
+                        duration: (now - steps[steps.length - 1].startTime) / 1000
+                      };
                     }
                     steps.push({ label: thought, startTime: now });
+                    updatedMsg.timings = { ...updatedMsg.timings, steps };
                   }
                 }
 
-                const currentThoughts = lastMsg.thoughts || []
+                const currentThoughts = updatedMsg.thoughts || []
                 if (!currentThoughts.includes(thought)) {
-                  const updatedThoughts = [...currentThoughts, thought]
-                  lastMsg.thoughts = updatedThoughts
+                  updatedMsg.thoughts = [...currentThoughts, thought];
                 }
+
+                newMessages[newMessages.length - 1] = updatedMsg;
               }
               return newMessages
             })
@@ -1169,13 +1177,15 @@ function App() {
               const newMessages = [...prev]
               const lastMsg = newMessages[newMessages.length - 1]
               if (lastMsg.role === 'agent') {
-                lastMsg.content = fullResponse
+                newMessages[newMessages.length - 1] = {
+                  ...lastMsg,
+                  content: fullResponse
+                };
               }
               return newMessages
             })
           } else if (line.startsWith('LINK: ')) {
             let link = line.substring(6).trim()
-            // Check if link is in markdown format [url](url) or [text](url)
             const markdownMatch = link.match(/\[.*?\]\((.*?)\)/);
             if (markdownMatch) {
               link = markdownMatch[1];
@@ -1184,7 +1194,10 @@ function App() {
               const newMessages = [...prev]
               const lastMsg = newMessages[newMessages.length - 1]
               if (lastMsg.role === 'agent') {
-                lastMsg.link = link
+                newMessages[newMessages.length - 1] = {
+                  ...lastMsg,
+                  link: link
+                };
               }
               return newMessages
             })
@@ -1196,7 +1209,10 @@ function App() {
               if (lastMsg.role === 'agent') {
                 const currentSuggestions = lastMsg.suggestions || []
                 if (!currentSuggestions.includes(suggestion)) {
-                  lastMsg.suggestions = [...currentSuggestions, suggestion]
+                  newMessages[newMessages.length - 1] = {
+                    ...lastMsg,
+                    suggestions: [...currentSuggestions, suggestion]
+                  };
                 }
               }
               return newMessages
@@ -1214,19 +1230,18 @@ function App() {
                     const newMessages = [...prev]
                     const lastMsg = newMessages[newMessages.length - 1]
                     if (lastMsg.role === 'agent') {
-                      lastMsg.tableData = jsonContent.data
+                      const updatedMsg = { ...lastMsg, tableData: jsonContent.data };
 
                       // Auto-generate chart if applicable AND requested
-                      if (!lastMsg.chartConfig && jsonContent.data.rows.length > 1 && showChartRequested) {
+                      if (!updatedMsg.chartConfig && jsonContent.data.rows.length > 1 && showChartRequested) {
                         const fields = jsonContent.data.fields || []
                         const rows = jsonContent.data.rows || []
 
-                        // Heuristic: 1 date/cat + 1 metric
                         const dimension = fields.find(f => f.name.includes('date') || f.name.includes('month') || f.name.includes('name'))
                         const metric = fields.find(f => !f.name.includes('date') && !f.name.includes('month') && !f.name.includes('name'))
 
                         if (dimension && metric) {
-                          lastMsg.chartConfig = {
+                          updatedMsg.chartConfig = {
                             type: fields.length > 2 ? 'bar' : 'line',
                             data: {
                               labels: rows.map(r => r[dimension.name]),
@@ -1248,6 +1263,7 @@ function App() {
                           }
                         }
                       }
+                      newMessages[newMessages.length - 1] = updatedMsg;
                     }
                     return newMessages
                   })
@@ -1257,36 +1273,32 @@ function App() {
                     const newMessages = [...prev]
                     const lastMsg = newMessages[newMessages.length - 1]
                     if (lastMsg.role === 'agent') {
-                      lastMsg.link = jsonContent.url
+                      newMessages[newMessages.length - 1] = { ...lastMsg, link: jsonContent.url };
                     }
                     return newMessages
                   })
                   continue
                 } else if (jsonContent.type === 'json_chart') {
-                  // API v2 returns Vega-Lite config for fast mode charts
                   const config = jsonContent.config;
 
                   if (config && config.vega_config) {
-                    // Store Vega config directly for native rendering
                     setMessages(prev => {
                       const newMessages = [...prev]
                       const lastMsg = newMessages[newMessages.length - 1]
                       if (lastMsg.role === 'agent') {
-                        lastMsg.vegaConfig = config.vega_config;
+                        newMessages[newMessages.length - 1] = { ...lastMsg, vegaConfig: config.vega_config };
                       }
                       return newMessages
                     })
                     continue;
                   }
 
-                  // Fallback: Treat as signal to generate Chart.js chart from tableData
                   showChartRequested = true;
 
                   setMessages(prev => {
                     const newMessages = [...prev]
                     const lastMsg = newMessages[newMessages.length - 1]
 
-                    // Find the most recent tableData from any agent message
                     let tableData = null;
                     for (let i = newMessages.length - 1; i >= 0; i--) {
                       if (newMessages[i].role === 'agent' && newMessages[i].tableData) {
@@ -1304,7 +1316,7 @@ function App() {
                         const metric = fields.find(f => !f.name.includes('date') && !f.name.includes('month') && !f.name.includes('name'))
 
                         if (dimension && metric) {
-                          lastMsg.chartConfig = {
+                          const chartConfig = {
                             type: 'bar',
                             data: {
                               labels: rows.map(r => r[dimension.name]),
@@ -1323,7 +1335,8 @@ function App() {
                                 title: { display: true, text: metric.label }
                               }
                             }
-                          }
+                          };
+                          newMessages[newMessages.length - 1] = { ...lastMsg, chartConfig };
                         }
                       }
                     }
@@ -1335,11 +1348,23 @@ function App() {
                     const newMessages = [...prev]
                     const lastMsg = newMessages[newMessages.length - 1]
                     if (lastMsg.role === 'agent') {
-                      lastMsg.graphData = jsonContent.graphData;
+                      newMessages[newMessages.length - 1] = { ...lastMsg, graphData: jsonContent.graphData };
                     }
                     return newMessages
                   })
                   continue
+                } else if (jsonContent.type === 'query_details') {
+                  setMessages(prev => {
+                    const newMessages = [...prev]
+                    const lastMsg = newMessages[newMessages.length - 1]
+                    if (lastMsg.role === 'agent') {
+                      const sqlQueries = lastMsg.sqlQueries ? [...lastMsg.sqlQueries] : [];
+                      sqlQueries.push(jsonContent);
+                      newMessages[newMessages.length - 1] = { ...lastMsg, sqlQueries };
+                    }
+                    return newMessages
+                  })
+                  continue;
                 }
               } catch (e) {
                 // Not JSON, treat as text
@@ -1432,6 +1457,33 @@ function App() {
                 }
                 return newMessages
               })
+            }
+
+            // Skip raw query_details JSON that shouldn't be displayed to user
+            // These should have been filtered server-side, but catch any that slipped through
+            // Handle both single JSON and multiple concatenated JSON objects
+
+            // Check if the entire line is just JSON blobs (no actual text content)
+            const trimmedLine = contentLine.trim();
+            if (trimmedLine.startsWith('{"type":') && trimmedLine.includes('"query_details"')) {
+              // The entire line is JSON - skip it entirely
+              continue;
+            }
+
+            // Check for multiple JSON objects or any {"type": ..., "sql": ..., "source": ...} patterns
+            if (trimmedLine.includes('{"type":') && trimmedLine.includes('"source":') && trimmedLine.includes('"sql":')) {
+              // Try to extract any non-JSON text by removing all JSON objects
+              // Pattern matches: {"type": ... "source": "..."} 
+              let cleaned = trimmedLine.replace(/\{"type":\s*"[^"]*"[^}]*"source":\s*"[^"]*"\s*\}/g, '');
+              cleaned = cleaned.trim();
+
+              if (!cleaned) {
+                // Nothing left after removing JSON - skip
+                continue;
+              }
+
+              // Use the cleaned version
+              contentLine = cleaned;
             }
 
             // Append with newline to preserve formatting
@@ -1824,7 +1876,38 @@ function App() {
             position: 'absolute', inset: 0, zIndex: 9999, background: 'transparent'
           }} />}
           <div style={{ flex: 1, position: 'relative' }}>
-            {activeDashboard === 'chat' ? (
+            {/* Expanded Graph View - takes over main content area */}
+            {expandedGraph ? (
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'var(--background)', padding: '1rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                  <h2 style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--foreground)' }}>
+                    Social Graph Visualization
+                    <span style={{ fontSize: '0.875rem', fontWeight: 400, marginLeft: '0.5rem', color: 'var(--muted-foreground)' }}>
+                      ({expandedGraph.nodes?.length || 0} nodes, {expandedGraph.links?.length || 0} connections)
+                    </span>
+                  </h2>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setExpandedGraph(null)}
+                    className="flex items-center gap-1"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                    Close
+                  </Button>
+                </div>
+                <div style={{ height: 'calc(100% - 3rem)', borderRadius: '0.5rem', overflow: 'hidden', border: '1px solid var(--border)' }}>
+                  <GraphRenderer
+                    data={expandedGraph}
+                    width={window.innerWidth - sidebarWidth - 100}
+                    height={window.innerHeight - 200}
+                  />
+                </div>
+              </div>
+            ) : activeDashboard === 'chat' ? (
               /* Chat is now sidebar only, this view might be deprecated or used for full-screen chat. 
                  But based on layout, we are toggling DASHBOARDS here. */
               <div style={{ padding: '2rem', color: '#fff' }}>Select a dashboard from the left.</div>
@@ -2045,7 +2128,7 @@ function App() {
                 {/* Vega Chart (from Fast Mode API v2) */}
                 {msg.vegaConfig && (
                   <div className="mt-4 p-4 bg-background rounded-lg border">
-                    <VegaChartRenderer vegaConfig={msg.vegaConfig} />
+                    <VegaChartRenderer vegaConfig={msg.vegaConfig} data={msg.tableData} />
                   </div>
                 )}
 
@@ -2058,7 +2141,22 @@ function App() {
 
                 {/* Graph Analytics Renderer */}
                 {msg.graphData && (
-                  <div className="mt-4 p-4 bg-background rounded-lg border h-[500px]">
+                  <div
+                    className="mt-4 p-4 bg-background rounded-lg border h-[400px] relative cursor-pointer group hover:border-primary transition-colors"
+                    onClick={() => setExpandedGraph(msg.graphData)}
+                    title="Click to expand in main view"
+                  >
+                    <div className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="bg-primary text-primary-foreground px-2 py-1 rounded text-xs flex items-center gap-1">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="15 3 21 3 21 9"></polyline>
+                          <polyline points="9 21 3 21 3 15"></polyline>
+                          <line x1="21" y1="3" x2="14" y2="10"></line>
+                          <line x1="3" y1="21" x2="10" y2="14"></line>
+                        </svg>
+                        Expand
+                      </div>
+                    </div>
                     <GraphRenderer data={msg.graphData} />
                   </div>
                 )}

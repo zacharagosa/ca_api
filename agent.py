@@ -663,52 +663,75 @@ def query_spanner(sql: str):
 
 
 def extract_graph_from_rows(rows):
-    """Heuristic to extract graph nodes/links from SQL rows."""
+    """Heuristic to extract graph nodes/links from SQL rows.
+    
+    Handles multiple relationship types per row:
+    - Clan membership (player -> clan)
+    - Friendships (player <-> player)
+    - Items (player -> item)
+    """
     if not isinstance(rows, list) or not rows:
         return None
         
     nodes = {}
     links = []
+    link_set = set()  # Avoid duplicate links
+    
+    def add_link(source, target, link_type='default'):
+        """Add a link if it doesn't already exist."""
+        key = (source, target, link_type)
+        reverse_key = (target, source, link_type)
+        if key not in link_set and reverse_key not in link_set:
+            link_set.add(key)
+            links.append({'source': source, 'target': target, 'type': link_type})
     
     for row in rows:
         # Standardize keys to lowercase for easier matching
         row_lower = {k.lower(): v for k, v in row.items()}
         
-        # Player-Friend (initiator_id -> acceptor_id)
-        if 'initiator_id' in row and 'acceptor_id' in row:
-            nodes[row['initiator_id']] = {'id': row['initiator_id'], 'group': 'Player', 'label': row.get('initiator_gamertag', row['initiator_id'])}
-            nodes[row['acceptor_id']] = {'id': row['acceptor_id'], 'group': 'Player', 'label': row.get('acceptor_gamertag', row['acceptor_id'])}
-            links.append({'source': row['initiator_id'], 'target': row['acceptor_id']})
+        # === CLAN MEMBERSHIP RELATIONSHIPS ===
+        # Check for clan info in the row and add clan-player links
+        
+        # ID-based clan membership
+        if 'player_id' in row and 'clan_id' in row:
+            player_id = row['player_id']
+            clan_id = row['clan_id']
+            player_label = row.get('gamertag') or row.get('player_name') or str(player_id)
+            clan_label = row.get('clan_name') or str(clan_id)
             
-        # Player-Clan (player_id -> clan_id)
-        elif 'player_id' in row and 'clan_id' in row:
-             nodes[row['player_id']] = {'id': row['player_id'], 'group': 'Player', 'label': row.get('gamertag', row['player_id'])}
-             nodes[row['clan_id']] = {'id': row['clan_id'], 'group': 'Clan', 'label': row.get('clan_name', row['clan_id'])}
-             links.append({'source': row['player_id'], 'target': row['clan_id']})
-             
-        # Player-Item (player_id -> item_id)
-        elif 'player_id' in row and 'item_id' in row:
-             nodes[row['player_id']] = {'id': row['player_id'], 'group': 'Player', 'label': row.get('gamertag', row['player_id'])}
-             nodes[row['item_id']] = {'id': row['item_id'], 'group': 'Item', 'label': row.get('item_name', row['item_id'])}
-             links.append({'source': row['player_id'], 'target': row['item_id']})
-
-        # Name-based Extraction (Fallback if IDs are missing but names are present)
-        # Clan Name <-> Gamertag/Player Name
-        elif 'clan_name' in row_lower and ('gamertag' in row_lower or 'player_name' in row_lower):
+            nodes[f"clan:{clan_id}"] = {'id': f"clan:{clan_id}", 'group': 'Clan', 'label': clan_label}
+            nodes[f"player:{player_id}"] = {'id': f"player:{player_id}", 'group': 'Player', 'label': player_label}
+            add_link(f"player:{player_id}", f"clan:{clan_id}", 'membership')
+        
+        # Name-based clan membership (when IDs not present)
+        elif 'clan_name' in row_lower and ('gamertag' in row_lower or 'player_name' in row_lower or 'player' in row_lower):
             clan_name = row_lower['clan_name']
-            player_name = row_lower.get('gamertag') or row_lower.get('player_name')
+            player_name = row_lower.get('gamertag') or row_lower.get('player_name') or row_lower.get('player')
             
             if clan_name and player_name:
-                # Use names as IDs if real IDs are missing, but prefix them to avoid collisions
                 clan_id = f"clan:{clan_name}"
                 player_id = f"player:{player_name}"
                 
                 nodes[clan_id] = {'id': clan_id, 'group': 'Clan', 'label': clan_name}
                 nodes[player_id] = {'id': player_id, 'group': 'Player', 'label': player_name}
-                links.append({'source': player_id, 'target': clan_id})
-
-        # Friend Gamertag <-> Gamertag
-        elif 'gamertag' in row_lower and 'friend_gamertag' in row_lower:
+                add_link(player_id, clan_id, 'membership')
+        
+        # === FRIENDSHIP RELATIONSHIPS ===
+        # These use 'if' not 'elif' so we can capture friendships even if clan was already captured
+        
+        # ID-based friendships (initiator/acceptor)
+        if 'initiator_id' in row and 'acceptor_id' in row:
+            init_id = row['initiator_id']
+            acc_id = row['acceptor_id']
+            init_label = row.get('initiator_gamertag') or row.get('initiator_name') or str(init_id)
+            acc_label = row.get('acceptor_gamertag') or row.get('acceptor_name') or str(acc_id)
+            
+            nodes[f"player:{init_id}"] = {'id': f"player:{init_id}", 'group': 'Player', 'label': init_label}
+            nodes[f"player:{acc_id}"] = {'id': f"player:{acc_id}", 'group': 'Player', 'label': acc_label}
+            add_link(f"player:{init_id}", f"player:{acc_id}", 'friendship')
+        
+        # gamertag + friend_gamertag pattern
+        if 'gamertag' in row_lower and 'friend_gamertag' in row_lower:
             p1 = row_lower['gamertag']
             p2 = row_lower['friend_gamertag']
             
@@ -717,7 +740,54 @@ def extract_graph_from_rows(rows):
                 id2 = f"player:{p2}"
                 nodes[id1] = {'id': id1, 'group': 'Player', 'label': p1}
                 nodes[id2] = {'id': id2, 'group': 'Player', 'label': p2}
-                links.append({'source': id1, 'target': id2})
+                add_link(id1, id2, 'friendship')
+        
+        # player + friend pattern (GQL return)
+        if 'player' in row_lower and 'friend' in row_lower:
+            p1 = row_lower['player']
+            p2 = row_lower['friend']
+            
+            if p1 and p2:
+                id1 = f"player:{p1}"
+                id2 = f"player:{p2}"
+                nodes[id1] = {'id': id1, 'group': 'Player', 'label': p1}
+                nodes[id2] = {'id': id2, 'group': 'Player', 'label': p2}
+                add_link(id1, id2, 'friendship')
+        
+        # player_1 + player_2 pattern
+        if 'player_1' in row_lower and 'player_2' in row_lower:
+            p1 = row_lower['player_1']
+            p2 = row_lower['player_2']
+            
+            if p1 and p2:
+                id1 = f"player:{p1}"
+                id2 = f"player:{p2}"
+                nodes[id1] = {'id': id1, 'group': 'Player', 'label': p1}
+                nodes[id2] = {'id': id2, 'group': 'Player', 'label': p2}
+                add_link(id1, id2, 'friendship')
+        
+        # member_a + member_b pattern
+        if 'member_a' in row_lower and 'member_b' in row_lower:
+            p1 = row_lower['member_a']
+            p2 = row_lower['member_b']
+            
+            if p1 and p2:
+                id1 = f"player:{p1}"
+                id2 = f"player:{p2}"
+                nodes[id1] = {'id': id1, 'group': 'Player', 'label': p1}
+                nodes[id2] = {'id': id2, 'group': 'Player', 'label': p2}
+                add_link(id1, id2, 'friendship')
+        
+        # === ITEM RELATIONSHIPS ===
+        if 'player_id' in row and 'item_id' in row:
+            player_id = row['player_id']
+            item_id = row['item_id']
+            player_label = row.get('gamertag') or str(player_id)
+            item_label = row.get('item_name') or str(item_id)
+            
+            nodes[f"player:{player_id}"] = {'id': f"player:{player_id}", 'group': 'Player', 'label': player_label}
+            nodes[f"item:{item_id}"] = {'id': f"item:{item_id}", 'group': 'Item', 'label': item_label}
+            add_link(f"player:{player_id}", f"item:{item_id}", 'ownership')
     
     if not nodes and not links:
         return None
@@ -1045,8 +1115,8 @@ def run_deep_analysis(question: str):
         )
         log_thought(f"Initial Plan Generated in {time.time() - t0:.2f}s")
         
-        # Loop for tool calls (max 5 turns to prevent infinite loops)
-        for _ in range(5):
+        # Loop for tool calls (max 10 turns to prevent infinite loops)
+        for _ in range(10):
             candidate = response.candidates[0]
             
             # Collect all function calls from all parts
@@ -1132,6 +1202,9 @@ def run_deep_analysis(question: str):
             else:
                 # No content?
                 break
+        else:
+            # If we hit the max iterations without breaking, yield a final message
+            yield {'content': {'parts': [{'text': "I have analyzed the data extensively but reached my maximum reasoning limit. Please try breaking down your question into smaller, more specific pieces."}]}}
     except Exception as e:
         log_thought(f"Deep Analysis Error: {e}")
         yield {'content': {'parts': [{'text': f"An error occurred during deep analysis: {e}"}]}}

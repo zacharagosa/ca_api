@@ -7,77 +7,67 @@ import { VegaEmbed } from 'react-vega';
  * The API returns a vega_config object with encoding, data, mark, and title.
  * This component wraps it with proper sizing and light theme defaults.
  */
-const VegaChartRenderer = ({ vegaConfig, width = 'container', height = 250 }) => {
+const VegaChartRenderer = ({ vegaConfig, data, width = 'container', height = 250 }) => {
     // Build the complete Vega-Lite spec with defaults
     const spec = useMemo(() => {
-        if (!vegaConfig) return null;
+        try {
+            const safeVegaConfig = vegaConfig ? JSON.parse(JSON.stringify(vegaConfig)) : null;
+            if (!safeVegaConfig) return null;
 
-        // Basic validation - must have minimal Vega-Lite properties
-        // If it's an empty object or lacks visual definitions, don't render
-        const hasVisuals = vegaConfig.mark || vegaConfig.layer || vegaConfig.concat || vegaConfig.vconcat || vegaConfig.hconcat;
-        if (!hasVisuals) return null;
+            // Handle nested config (API v2 often wraps the spec in a "vega_config" key)
+            const actualConfig = safeVegaConfig.vega_config || safeVegaConfig;
 
-        return {
-            $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
-            width: width,
-            height: height,
-            autosize: {
-                type: 'fit',
-                contains: 'padding'
-            },
-            // Merge in the config from API
-            ...vegaConfig,
-            // Override config for light theme styling
-            config: {
-                background: 'transparent',
-                view: {
-                    stroke: 'transparent'
+            const hasVisuals = actualConfig.mark || actualConfig.layer || actualConfig.concat || actualConfig.vconcat || actualConfig.hconcat;
+            if (!hasVisuals) return null;
+
+            const finalSpec = {
+                $schema: 'https://vega.github.io/schema/vega-lite/v6.json',
+                width: width === 'container' ? 'container' : (width || 500),
+                height: height || 250,
+                autosize: {
+                    type: 'fit',
+                    contains: 'padding'
                 },
-                axis: {
-                    labelColor: '#6B7280',
-                    titleColor: '#374151',
-                    gridColor: '#E5E7EB',
-                    domainColor: '#D1D5DB',
-                    tickColor: '#D1D5DB'
-                },
-                legend: {
-                    labelColor: '#6B7280',
-                    titleColor: '#374151'
-                },
-                title: {
-                    color: '#111827',
-                    fontSize: 14,
-                    fontWeight: 600
-                },
-                bar: {
-                    color: '#3B82F6'
-                },
-                line: {
-                    color: '#3B82F6',
-                    strokeWidth: 2
-                },
-                point: {
-                    color: '#3B82F6'
-                },
-                area: {
-                    color: '#3B82F6',
-                    opacity: 0.3
-                },
-                ...vegaConfig.config
+                ...actualConfig,
+                config: {
+                    background: 'transparent',
+                    view: { stroke: 'transparent' },
+                    axis: {
+                        labelColor: '#6B7280', titleColor: '#374151', gridColor: '#E5E7EB',
+                        domainColor: '#D1D5DB', tickColor: '#D1D5DB'
+                    },
+                    legend: { labelColor: '#6B7280', titleColor: '#374151' },
+                    title: { color: '#111827', fontSize: 14, fontWeight: 600 },
+                    bar: { color: '#3B82F6' },
+                    line: { color: '#3B82F6', strokeWidth: 2 },
+                    point: { color: '#3B82F6' },
+                    area: { color: '#3B82F6', opacity: 0.3 },
+                    ...(actualConfig.config || {})
+                }
+            };
+
+            // Safely inject data without overwriting the entire data object if it already has a "name" property
+            if (data && data.rows && data.rows.length > 0) {
+                // Overwrite data entirely to drop the "name" attribute, forcing Vega-Lite to process it as inline data
+                finalSpec.data = { values: data.rows };
             }
-        };
-    }, [vegaConfig, width, height]);
+
+            return finalSpec;
+        } catch (e) {
+            console.error("Vega spec generation error:", e);
+            return null;
+        }
+    }, [vegaConfig, data, width, height]);
 
     if (!spec) return null;
 
     return (
-        <div className="w-full">
+        <div className="w-full min-h-[250px] min-w-[300px]" style={{ width: '100%', minHeight: '250px' }}>
             <VegaEmbed
                 spec={spec}
-                options={{
-                    actions: false,
-                    renderer: 'svg'
-                }}
+                actions={false}
+                renderer="svg"
+                width="container"
             />
         </div>
     );
