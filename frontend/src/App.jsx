@@ -63,17 +63,17 @@ const ChartRenderer = ({ config }) => {
       plugins: {
         legend: {
           position: 'top',
-          labels: { color: '#374151', font: { size: 12 } }
+          labels: { color: 'hsl(var(--foreground))', font: { size: 12 } }
         },
         title: config.options?.plugins?.title ? {
           ...config.options.plugins.title,
-          color: '#111827',
+          color: 'hsl(var(--foreground))',
           font: { size: 14, weight: 'bold' }
         } : undefined
       },
       scales: {
-        x: { ticks: { color: '#6B7280' }, grid: { color: '#E5E7EB' } },
-        y: { ticks: { color: '#6B7280' }, grid: { color: '#E5E7EB' } }
+        x: { ticks: { color: 'hsl(var(--muted-foreground))' }, grid: { color: 'hsl(var(--border))' } },
+        y: { ticks: { color: 'hsl(var(--muted-foreground))' }, grid: { color: 'hsl(var(--border))' } }
       }
     };
     // Merge user options with light theme defaults
@@ -101,30 +101,30 @@ const ChartRenderer = ({ config }) => {
       legend: {
         position: 'top',
         labels: {
-          color: '#374151', // gray-700 for light theme
+          color: 'hsl(var(--foreground))',
           font: { size: 12 }
         }
       },
       title: {
         display: !!config.title,
         text: config.title,
-        color: '#111827', // gray-900 for light theme
+        color: 'hsl(var(--foreground))',
         font: { size: 14, weight: 'bold' }
       },
     },
     scales: {
       x: {
         stacked: config.stacked,
-        ticks: { color: '#6B7280' }, // gray-500
-        grid: { color: '#E5E7EB' }, // gray-200
+        ticks: { color: 'hsl(var(--muted-foreground))' },
+        grid: { color: 'hsl(var(--border))' },
       },
       y: {
         type: 'linear',
         display: true,
         position: 'left',
         stacked: config.stacked,
-        ticks: { color: '#6B7280' }, // gray-500
-        grid: { color: '#E5E7EB' }, // gray-200
+        ticks: { color: 'hsl(var(--muted-foreground))' },
+        grid: { color: 'hsl(var(--border))' },
       },
       ...(hasRightAxis && {
         y1: {
@@ -135,7 +135,7 @@ const ChartRenderer = ({ config }) => {
             drawOnChartArea: false,
           },
           stacked: config.stacked,
-          ticks: { color: '#6B7280' },
+          ticks: { color: 'hsl(var(--muted-foreground))' },
         }
       }),
     },
@@ -1810,7 +1810,7 @@ function App() {
 
       {/* Main Workspace */}
       <div className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex items-center justify-between border-b bg-background px-6 py-4">
+        <header className="flex items-center justify-between border-b glass px-6 py-4">
           <div className="flex items-center gap-3">
             <div className="rounded-lg bg-primary/10 p-2">
               <Bot className="text-primary h-6 w-6" />
@@ -1958,7 +1958,7 @@ function App() {
       {/* Assistant Sidebar */}
       <aside
         ref={sidebarRef}
-        className={`flex flex-col border-l bg-background transition-all duration-300 ${isSidebarOpen ? '' : 'w-0 opacity-0 overflow-hidden'}`}
+        className={`flex flex-col border-l glass transition-all duration-300 ${isSidebarOpen ? '' : 'w-0 opacity-0 overflow-hidden'}`}
         style={{ width: isSidebarOpen ? sidebarWidth : 0 }}
       >
         <header className="flex items-center justify-between border-b px-4 py-3">
@@ -2241,7 +2241,7 @@ function App() {
           <div ref={messagesEndRef} />
         </div>
 
-        <footer className="border-t bg-background p-4 flex flex-col gap-2">
+        <footer className="border-t glass p-4 flex flex-col gap-2">
           {/* Agent Mode Toggle */}
           <div className="flex justify-center gap-1 mb-2 items-center">
             <Button

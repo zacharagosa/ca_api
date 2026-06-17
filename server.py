@@ -684,4 +684,4 @@ if __name__ == '__main__':
     #     else:
     #         print("Server will start, but external API calls might fail if not authenticated.")
 
-    app.run(debug=True, host='0.0.0.0', port=8080)
+    app.run(debug=False, use_reloader=False, host='127.0.0.1', port=8080)

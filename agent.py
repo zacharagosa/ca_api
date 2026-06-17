@@ -915,10 +915,31 @@ def get_insights(question: str):
                 schema_insights.append(message_dict["schema"])
             elif "data" in message_dict:
                 log_debug(f"Chunk {i} Data: {message_dict['data']}")
-                data_insights.append(message_dict["data"])
                 
-                # Extract and log the SQL query if available
-                result_data = message_dict['data'].get('result', {})
+                # Normalize data if it's a list (e.g. chunks yielded from gemini-3.5-flash)
+                data_dict = message_dict['data']
+                if isinstance(data_dict, list):
+                    merged_data_dict = {}
+                    for item in data_dict:
+                        if isinstance(item, dict):
+                            for k, v in item.items():
+                                if k in merged_data_dict and isinstance(merged_data_dict[k], dict) and isinstance(v, dict):
+                                    merged_data_dict[k].update(v)
+                                elif k in merged_data_dict and isinstance(merged_data_dict[k], list) and isinstance(v, list):
+                                    merged_data_dict[k].extend(v)
+                                else:
+                                    merged_data_dict[k] = v
+                    data_dict = merged_data_dict
+                    message_dict['data'] = data_dict
+                
+                data_insights.append(data_dict)
+                
+                result_data = data_dict.get('result', {})
+                if isinstance(result_data, list):
+                    # It's a list of rows, so wrap it in a standard result dict
+                    result_data = {"rows": result_data, "schema": {}}
+                    data_dict['result'] = result_data
+                
                 if 'sql' in result_data:
                      log_debug(f"Generated SQL: {result_data['sql']}")
                 
@@ -1090,9 +1111,8 @@ def run_deep_analysis(question: str):
         )
         print("INFO: Added query_spanner tool to Deep Mode.")
 
-    # Initialize the model
     model = GenerativeModel(
-        "gemini-3-flash-preview",
+        "gemini-3.5-flash",
         tools=[analysis_tools],
         tool_config=ToolConfig(
             function_calling_config=ToolConfig.FunctionCallingConfig(
@@ -1106,29 +1126,28 @@ def run_deep_analysis(question: str):
     
     try:
         t0 = time.time()
-        # response = chat.send_message(question)
-        response = retry_api_call(
-            lambda: chat.send_message(question),
+        response_stream = retry_api_call(
+            lambda: chat.send_message(question, stream=True),
             retries=3,
             delay=2,
             error_msg="Deep Analysis initial chat failed"
         )
-        log_thought(f"Initial Plan Generated in {time.time() - t0:.2f}s")
         
         # Loop for tool calls (max 10 turns to prevent infinite loops)
         for _ in range(10):
-            candidate = response.candidates[0]
-            
-            # Collect all function calls from all parts
             function_calls = []
             text_parts = []
             
-            for part in candidate.content.parts:
-                if part.function_call:
-                    function_calls.append(part.function_call)
-                elif part.text:
-                    text_parts.append(part.text)
-
+            for chunk in response_stream:
+                candidate = chunk.candidates[0]
+                for part in candidate.content.parts:
+                    if part.function_call:
+                        function_calls.append(part.function_call)
+                    elif part.text:
+                        text_parts.append(part.text)
+                        # Stream the text as thought
+                        log_thought(part.text)
+            
             if function_calls:
                 log_thought(f"Deep Analysis: Executing {len(function_calls)} tool call(s)...")
                 
@@ -1139,20 +1158,63 @@ def run_deep_analysis(question: str):
                     for fn in function_calls:
                         log_debug(f"Tool Call: {fn.name}, Args: {fn.args}")
                         if fn.name == "get_insights":
-                            # get_insights expects 'question', but the model might call it with 'query' or 'question'
-                            # The tool definition for get_insights has 'question'.
-                            question_arg = fn.args.get("question") or fn.args.get("query")
+                            if isinstance(fn.args, list):
+                                args_dict = {}
+                                for arg in fn.args:
+                                    if isinstance(arg, dict):
+                                        args_dict.update(arg)
+                            elif isinstance(fn.args, dict):
+                                args_dict = fn.args
+                            else:
+                                import json
+                                try:
+                                    loaded = json.loads(fn.args)
+                                    if isinstance(loaded, dict):
+                                        args_dict = loaded
+                                    elif isinstance(loaded, list):
+                                        args_dict = {}
+                                        for item in loaded:
+                                            if isinstance(item, dict):
+                                                args_dict.update(item)
+                                    else:
+                                        args_dict = {}
+                                except:
+                                    args_dict = {}
+                            
+                            question_arg = args_dict.get("question") or args_dict.get("query")
                             if not question_arg:
-                                # Fallback if neither is present (shouldn't happen with correct schema)
-                                question_arg = list(fn.args.values())[0] if fn.args else ""
+                                question_arg = list(args_dict.values())[0] if args_dict else ""
                                 
                             futures.append(executor.submit(get_insights, question_arg))
                         elif fn.name == "query_spanner":
-                             sql_arg = fn.args.get("sql")
-                             futures.append(executor.submit(query_spanner, sql_arg))
+                            if isinstance(fn.args, list):
+                                args_dict = {}
+                                for arg in fn.args:
+                                    if isinstance(arg, dict):
+                                        args_dict.update(arg)
+                            elif isinstance(fn.args, dict):
+                                args_dict = fn.args
+                            else:
+                                import json
+                                try:
+                                    loaded = json.loads(fn.args)
+                                    if isinstance(loaded, dict):
+                                        args_dict = loaded
+                                    elif isinstance(loaded, list):
+                                        args_dict = {}
+                                        for item in loaded:
+                                            if isinstance(item, dict):
+                                                args_dict.update(item)
+                                    else:
+                                        args_dict = {}
+                                except:
+                                    args_dict = {}
+                                    
+                            sql_arg = args_dict.get("sql")
+                            futures.append(executor.submit(query_spanner, sql_arg))
                         else:
                             log_debug(f"Unknown tool: {fn.name}")
-                            futures.append(None) # Handle unknown tools if necessary
+                            futures.append(None)
 
                     # Collect results
                     tool_responses = []
@@ -1167,10 +1229,6 @@ def run_deep_analysis(question: str):
                                         response={"content": result}
                                     )
                                 )
-                                
-                                # Graph data and query details are now emitted directly by query_spanner 
-                                # via the global data_queue, so we don't need to do it here.
-                                       
                             except Exception as e:
                                 tool_responses.append(
                                     Part.from_function_response(
@@ -1179,14 +1237,12 @@ def run_deep_analysis(question: str):
                                     )
                                 )
                         else:
-                             # Unknown tool
                              pass
                 
                 log_thought("Synthesizing findings...")
                 t_synth = time.time()
-                # response = chat.send_message(tool_responses)
-                response = retry_api_call(
-                    lambda: chat.send_message(tool_responses),
+                response_stream = retry_api_call(
+                    lambda: chat.send_message(tool_responses, stream=True),
                     retries=3,
                     delay=2,
                     error_msg="Deep Analysis synthesis step failed"
@@ -1195,7 +1251,6 @@ def run_deep_analysis(question: str):
                 
             elif text_parts:
                 # Text response (Final answer)
-                # Combine all text parts
                 full_text = "".join(text_parts)
                 yield {'content': {'parts': [{'text': full_text}]}}
                 break
@@ -1244,7 +1299,7 @@ def perform_deep_analysis(question: str):
 
 # Visualization Agent
 visualization_agent = Agent(
-    model="gemini-3-flash-preview",
+    model="gemini-3.5-flash",
     name="VisualizationAgent",
     description="Tool that generates the specific JSON configuration required for rendering charts. Use this whenever the user asks for a visualization or the data represents a trend.",
     instruction="""You are a data visualization expert. Your task is to take raw data (in JSON format) and a user question, and generate a JSON configuration for a Chart.js chart.
@@ -1304,7 +1359,7 @@ visualization_agent = Agent(
 
 
 unified_agent = Agent(
-    model="gemini-3-flash-preview",
+    model="gemini-3.5-flash",
     name="UnifiedAnalyticsAgent",
     instruction=AGENT_CONFIG.get('_computed', {}).get('unified_agent', """You are an expert mobile gaming data analyst..."""),
     tools=[
