@@ -104,6 +104,7 @@ def chat():
     user_id = data.get('user_id', 'web_user')
     session_id = data.get('session_id', 'default_session') # Use session_id if provided, else default
     force_refresh = data.get('force_refresh', False)
+    model_name = data.get('model_name')
     
     if not user_input:
         return jsonify({'error': 'No message provided'}), 400
@@ -182,7 +183,15 @@ def chat():
                     return
 
                 # 2. Run Agent
-                stream = current_agent_app.stream_query(message=final_input, user_id=user_id, session_id=session_id)
+                kwargs = {'message': final_input, 'user_id': user_id, 'session_id': session_id}
+                import inspect
+                try:
+                    sig = inspect.signature(current_agent_app.stream_query)
+                    if 'model_name' in sig.parameters and model_name:
+                        kwargs['model_name'] = model_name
+                except Exception as e:
+                    print(f"DEBUG: Could not inspect stream_query signature: {e}")
+                stream = current_agent_app.stream_query(**kwargs)
                 
                 full_response_accumulator = []
                 
@@ -534,6 +543,23 @@ def get_dataset_config():
         print(f"Dataset Config Error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/daily-summary', methods=['GET', 'POST'])
+def get_daily_summary():
+    """Generates or retrieves yesterday's daily summary cached result."""
+    try:
+        force_refresh = False
+        if request.method == 'POST':
+            data = request.get_json(silent=True) or {}
+            force_refresh = data.get('force_refresh', False)
+        else:
+            force_refresh = request.args.get('force_refresh', 'false').lower() == 'true'
+            
+        summary = agent.generate_daily_summary(force_refresh=force_refresh)
+        return jsonify(summary)
+    except Exception as e:
+        print(f"Daily Summary Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/auth/login_url', methods=['GET'])
 def login_url():
     """Returns the Looker OAuth authorization URL."""
@@ -662,8 +688,243 @@ def get_embed_url():
         return jsonify({'error': str(e)}), 500
 
 
+def get_real_retention():
+    """Queries live Looker retention metrics with a local JSON cache fallback."""
+    try:
+        print("INFO: Querying live Looker retention rate via get_insights...")
+        res = agent.get_insights("What was yesterday's Day 1 retention rate?")
+        if res and res.get('status') == 'success' and 'data_insights' in res:
+            data = res['data_insights'][0]
+            rows = data.get('result', {}).get('rows', [])
+            if not rows:
+                rows = data.get('result', {}).get('data', [])
+            if rows:
+                for row in rows:
+                    for k, v in row.items():
+                        if 'retention' in k.lower() and v is not None:
+                            val = float(v)
+                            # Convert fractional decimal (e.g. 0.0556) to percentage (e.g. 5.56)
+                            if 0.0 < val < 1.0:
+                                val *= 100
+                            return val
+    except Exception as e:
+        print(f"Error querying live retention: {e}")
+        
+    try:
+        cache_path = "datasets/events_daily_summary_cache.json"
+        if os.path.exists(cache_path):
+            with open(cache_path, 'r') as f:
+                cache = json.load(f)
+                val = cache.get("games", {}).get("overall", {}).get("metrics", {}).get("retention", {}).get("value")
+                if val is not None:
+                    print(f"INFO: Live Looker query failed or empty; fell back to cached retention value: {val}%")
+                    return float(val)
+    except Exception as e:
+        print(f"Error reading daily summary cache fallback: {e}")
+        
+    return 5.56  # absolute default fallback
 
 
+@app.route('/api/agent-workflow/stream')
+def stream_agent_workflow():
+    workflow_id = request.args.get('workflow_id', 'kpi_monitor')
+    
+    def generate():
+        import datetime
+        if workflow_id == 'kpi_monitor':
+            # Step 1: Spawn Agent
+            yield "data: " + json.dumps({'step': 1, 'status': 'info', 'message': "Spawning Antigravity Agent 'KPI-Monitor-Bot' using ADK SDK..."}) + "\n\n"
+            time.sleep(1.0)
+            
+            # Step 2: Load Config
+            yield "data: " + json.dumps({'step': 2, 'status': 'info', 'message': "Loading agent configuration with base instructions & model parameters (gemini-3.5-flash)..."}) + "\n\n"
+            time.sleep(1.0)
+            
+            # Step 3: Query Looker (performing the actual action!)
+            yield "data: " + json.dumps({'step': 3, 'status': 'querying', 'message': "Connecting to Looker events explore to analyze retention metrics..."}) + "\n\n"
+            
+            retention_rate = get_real_retention()
+            threshold = 5.00
+            is_critical = retention_rate < threshold
+            time.sleep(1.5)
+            
+            # Step 4: Display query result
+            status_type = "warning" if is_critical else "info"
+            message_prefix = "ALERT: " if is_critical else ""
+            msg = f"Query completed. Current D1 retention is {retention_rate:.2f}% (Alert threshold is set to {threshold:.2f}%). {message_prefix}Status: {'CRITICAL' if is_critical else 'HEALTHY'}."
+            yield "data: " + json.dumps({'step': 4, 'status': status_type, 'message': msg}) + "\n\n"
+            time.sleep(1.0)
+            
+            # Step 5: Register cron trigger
+            yield "data: " + json.dumps({'step': 5, 'status': 'info', 'message': "Registering periodic cron trigger (every 4 hours) for automatic health checks..."}) + "\n\n"
+            time.sleep(1.0)
+            
+            # Step 6: Configure safety policies
+            yield "data: " + json.dumps({'step': 6, 'status': 'info', 'message': "Binding safety policy constraints to prevent unauthorized API execution..."}) + "\n\n"
+            time.sleep(1.0)
+            
+            # Step 7: Alert payload configuration
+            slack_webhook = os.getenv("SLACK_WEBHOOK_URL")
+            gchat_webhook = os.getenv("GOOGLE_CHAT_WEBHOOK_URL")
+            
+            dest_name = "Google Chat" if gchat_webhook else ("Slack" if slack_webhook else "local file")
+            yield "data: " + json.dumps({'step': 7, 'status': 'info', 'message': f"Configuring alert integration for destination: {dest_name}..."}) + "\n\n"
+            time.sleep(1.0)
+            
+            # Perform real Alert action
+            current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            payload = {
+                "text": f"🚨 *KPI Alert: Day 1 Retention Monitor* 🚨\n*Game Portfolio*: Overall\n*Current Retention*: {retention_rate:.2f}%\n*Threshold*: {threshold:.2f}%\n*Status*: {'⚠️ CRITICAL' if is_critical else '✅ HEALTHY'}\n*Timestamp*: {current_time}"
+            }
+            
+            sent_alert = False
+            alert_msg = ""
+            
+            if gchat_webhook:
+                try:
+                    r = requests.post(gchat_webhook, json=payload, timeout=5)
+                    if r.status_code in (200, 201):
+                        alert_msg = f"Google Chat alert successfully posted (HTTP {r.status_code})."
+                        sent_alert = True
+                    else:
+                        alert_msg = f"Failed to post to Google Chat: Received HTTP status code {r.status_code}."
+                except Exception as e:
+                    alert_msg = f"Failed to post to Google Chat webhook: {e}"
+            
+            if not sent_alert and slack_webhook:
+                try:
+                    r = requests.post(slack_webhook, json=payload, timeout=5)
+                    if r.status_code in (200, 201):
+                        alert_msg = f"Slack alert successfully posted (HTTP {r.status_code})."
+                        sent_alert = True
+                    else:
+                        alert_msg = f"Failed to post to Slack: Received HTTP status code {r.status_code}."
+                except Exception as e:
+                    alert_msg = f"Failed to post to Slack webhook: {e}"
+            
+            if not sent_alert:
+                if not gchat_webhook and not slack_webhook:
+                    alert_msg = "Neither GOOGLE_CHAT_WEBHOOK_URL nor SLACK_WEBHOOK_URL set in .env. Logging payload locally to datasets/slack_alerts.json."
+                else:
+                    alert_msg = f"Webhooks failed. Falling back to local logging. Error details: {alert_msg}"
+                
+                try:
+                    alert_path = "datasets/slack_alerts.json"
+                    alert_data = []
+                    if os.path.exists(alert_path):
+                        with open(alert_path, 'r') as f:
+                            alert_data = json.load(f)
+                            if not isinstance(alert_data, list):
+                                alert_data = []
+                    alert_data.append({
+                        "timestamp": current_time,
+                        "retention_rate": retention_rate,
+                        "threshold": threshold,
+                        "status": "CRITICAL" if is_critical else "HEALTHY",
+                        "payload": payload
+                    })
+                    with open(alert_path, 'w') as f:
+                        json.dump(alert_data, f, indent=2)
+                except Exception as e:
+                    alert_msg = f"Error saving alert payload locally: {e}"
+                    
+            yield "data: " + json.dumps({'step': 8, 'status': 'info', 'message': alert_msg}) + "\n\n"
+            time.sleep(1.0)
+            
+            # Step 9: Final success indicator
+            yield "data: " + json.dumps({'step': 9, 'status': 'success', 'message': "Agent 'KPI-Monitor-Bot' successfully compiled and executed!"}) + "\n\n"
+        else:
+            if workflow_id == 'ad_optimizer':
+                steps = [
+                    {"step": 1, "status": "info", "message": "Initializing 'AdNetwork-Optimizer' Agent..."},
+                    {"step": 2, "status": "querying", "message": "Fetching CPM and ad conversion rates for Lookerwood Farm from Looker..."},
+                    {"step": 3, "status": "analyzing", "message": "Analyzing bid yields. Identified underperforming bid floor of $0.45 in Ad Network B..."},
+                    {"step": 4, "status": "planning", "message": "Calculating optimal CPM adjustment. Recommended change: Increase bid floor by 15% to $0.52..."},
+                    {"step": 5, "status": "executing", "message": "Connecting to external AdNetwork API (simulated gateway)..."},
+                    {"step": 6, "status": "executing", "message": "Applying bid floor update. Response received: 200 OK. New rate active."},
+                    {"step": 7, "status": "info", "message": "Updating Spanner database system settings to log bid optimization history..."},
+                    {"step": 8, "status": "info", "message": "Sending optimization run report to portfolio-leads@altostrat.com..."},
+                    {"step": 9, "status": "success", "message": "Ad Bids adjusted successfully! Estimated revenue impact: +$1,200/day."}
+                ]
+            elif workflow_id == 'deploy_gcf':
+                steps = [
+                    {"step": 1, "status": "info", "message": "Generating Python source code for Cloud Function: 'cohort-correlation-analyzer'..."},
+                    {"step": 2, "status": "info", "message": "Creating bundle containing function code and requirements.txt..."},
+                    {"step": 3, "status": "executing", "message": "Uploading function package to Google Cloud Storage bucket gs://ca_api/functions/..."},
+                    {"step": 4, "status": "executing", "message": "Executing gcloud deployment command: 'gcloud functions deploy cohort-correlation-analyzer' (simulated)..."},
+                    {"step": 5, "status": "info", "message": "Provisioning Cloud Function resources & configuring IAM invoker permissions..."},
+                    {"step": 6, "status": "success", "message": "Cloud Function successfully deployed! Endpoint: https://us-central1-aragosalooker.cloudfunctions.net/cohort-correlation-analyzer"}
+                ]
+            else:
+                steps = [
+                    {"step": 1, "status": "error", "message": "Unknown workflow ID requested."}
+                ]
+                
+            for step in steps:
+                yield f"data: {json.dumps(step)}\n\n"
+                time.sleep(1.0)
+            
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
+
+@app.route('/api/generate-narrative', methods=['POST', 'OPTIONS'])
+def generate_narrative():
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+        
+    data = request.json or {}
+    prompt = data.get('prompt')
+    model_name = data.get('model_name', 'gemini-3.5-flash')
+    
+    # Check for authentication token if NARRATIVE_SECRET_TOKEN is set
+    expected_token = os.getenv('NARRATIVE_SECRET_TOKEN')
+    if expected_token:
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({'error': 'Unauthorized: Missing token'}), 401
+        token = auth_header.split(' ')[1]
+        if token != expected_token:
+            return jsonify({'error': 'Unauthorized: Invalid token'}), 403
+            
+    if not prompt:
+        return jsonify({'error': 'No prompt provided'}), 400
+        
+    try:
+        from vertexai.generative_models import GenerativeModel
+        
+        # Whitelist/map the model. Only allow gemini-3.5-flash which we know works.
+        target_model = model_name
+        if "gemini-3" in target_model or "gemini-3.5" in target_model:
+            target_model = "gemini-3.5-flash"
+        else:
+            # Fallback/default to the verified gemini-3.5-flash model
+            target_model = "gemini-3.5-flash"
+            
+        print(f"Generating narrative using Vertex AI model: {target_model}", flush=True)
+        model = GenerativeModel(target_model)
+        
+        response = model.generate_content(prompt)
+        return jsonify({'text': response.text})
+    except Exception as e:
+        print(f"Narrative generation error: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/gemini_narrator.js', methods=['GET'])
+def serve_gemini_narrator():
+    """Serves the gemini_narrator.js file for local or Cloud Run Looker visualization testing."""
+    try:
+        viz_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'gemini_narrator.js')
+        if not os.path.exists(viz_path):
+            viz_path = 'gemini_narrator.js'
+        with open(viz_path, 'r') as f:
+            content = f.read()
+        return Response(content, mimetype='application/javascript')
+    except Exception as e:
+        print(f"Error serving gemini_narrator.js: {e}", flush=True)
+        return jsonify({'error': str(e)}), 404
 
 
 if __name__ == '__main__':

@@ -124,6 +124,10 @@ test_scenarios:
 
 # Dashboards shown in the left panel (update with actual dashboard IDs from your Looker instance)
 dashboards:
+  - id: ai_summary
+    title: "AI Daily Insights"
+    url: "local_dashboard"
+    icon: Sparkles
   - id: overview
     title: "Game Overview"
     url: "/embed/dashboards/s7T18I2e8fSSqkD0y8E31C"

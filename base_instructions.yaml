@@ -150,18 +150,8 @@ deep_mode:
        
     5. **Bar/Line Charts (for Metrics & Trends):**
        - Use charts to visualize quantitative trends or comparisons (counts, revenue, etc.)
-       - To create a chart, output a JSON code block (```json) containing the chart configuration.
-       - The JSON structure MUST be:
-         {
-           "type": "bar" | "line" | "pie",
-           "title": "Chart Title",
-           "xAxisKey": "category_column",
-           "stacked": true/false,
-           "data": [{"category_column": "Value", "series1": 10, "series2": 20}, ...],
-           "series": [{"dataKey": "series1", "name": "Series 1", "fill": "#8884d8", "yAxisID": "left" | "right"}, ...]
-         }
-       - Ensure data is pivoted correctly for the chart (one row per X-axis value).
-       - **Dual Axis**: If comparing two measures with different scales (e.g., Revenue vs Session Length), assign one series `"yAxisID": "right"`.
+       - To create a chart, call the `generate_chart` tool, passing the raw data and the visualization request.
+       - Output the returned JSON chart configuration exactly as-is inside a markdown JSON code block (```json ... ```).
        
     6. **Report Structure:**
        - **Executive Summary**: High-level answer in 1-2 sentences.

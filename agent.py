@@ -113,7 +113,7 @@ import threading
 
 from google.adk.agents import Agent
 from google.adk.tools import agent_tool
-from google.adk.tools.mcp_tool import MCPToolset, StdioConnectionParams
+# from google.adk.tools.mcp_tool import MCPToolset, StdioConnectionParams
 from google.auth import default
 from google.auth.transport.requests import Request as gRequest
 
@@ -1064,12 +1064,46 @@ def get_insights(question: str):
 
     return response
 
-def run_deep_analysis(question: str):
-    """Runs a deep analysis using a planning agent loop."""
-    log_thought("Entering Deep Analysis Mode (Gemini 3.0 Pro)...")
+def extract_tool_argument(args, param_names, default=""):
+    """Safely extracts a parameter from function call args of varying shapes."""
+    if not args:
+        return default
     
-    # Define the tool for the LLM
-    # Initialize the model
+    args_dict = {}
+    if isinstance(args, list):
+        for arg in args:
+            if isinstance(arg, dict):
+                args_dict.update(arg)
+    elif isinstance(args, dict):
+        args_dict = args
+    elif isinstance(args, str):
+        try:
+            import json
+            loaded = json.loads(args)
+            if isinstance(loaded, dict):
+                args_dict = loaded
+            elif isinstance(loaded, list):
+                for item in loaded:
+                    if isinstance(item, dict):
+                        args_dict.update(item)
+        except Exception:
+            pass
+            
+    for name in param_names:
+        if name in args_dict:
+            return args_dict[name]
+            
+    if args_dict:
+        return list(args_dict.values())[0]
+    return default
+
+def run_deep_analysis(question: str, model_name: str = None):
+    """Runs a deep analysis using a planning agent loop."""
+    if not model_name:
+        model_name = os.getenv("DEEP_MODE_MODEL", "gemini-3.5-flash")
+        
+    log_thought(f"Entering Deep Analysis Mode ({model_name}) - Activating reasoning engine to plan and execute queries across Looker metrics and Spanner Graph...")
+    
     # Define the tool for the LLM
     get_insights_func = FunctionDeclaration(
         name="get_insights",
@@ -1086,9 +1120,22 @@ def run_deep_analysis(question: str):
         }
     )
     
-    analysis_tools = Tool(
-        function_declarations=[get_insights_func]
+    generate_chart_func = FunctionDeclaration(
+        name="generate_chart",
+        description="Generates the specific JSON configuration required for rendering charts. Use this whenever the user asks for a visualization or the data represents a trend/comparison.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "data_and_question": {
+                    "type": "string",
+                    "description": "The raw data in JSON format, and the question/context about what to visualize."
+                }
+            },
+            "required": ["data_and_question"]
+        }
     )
+    
+    funcs = [get_insights_func, generate_chart_func]
     
     # Add Spanner tool if configured
     if SPANNER_INSTANCE_ID:
@@ -1106,13 +1153,13 @@ def run_deep_analysis(question: str):
                 "required": ["sql"]
             }
         )
-        analysis_tools = Tool(
-            function_declarations=[get_insights_func, query_spanner_func]
-        )
+        funcs.append(query_spanner_func)
         print("INFO: Added query_spanner tool to Deep Mode.")
 
+    analysis_tools = Tool(function_declarations=funcs)
+
     model = GenerativeModel(
-        "gemini-3.5-flash",
+        model_name,
         tools=[analysis_tools],
         tool_config=ToolConfig(
             function_calling_config=ToolConfig.FunctionCallingConfig(
@@ -1123,6 +1170,7 @@ def run_deep_analysis(question: str):
     )
     
     chat = model.start_chat()
+    intermediate_thoughts = []
     
     try:
         t0 = time.time()
@@ -1149,6 +1197,10 @@ def run_deep_analysis(question: str):
                         log_thought(part.text)
             
             if function_calls:
+                # Store any text parts generated in this turn as intermediate thoughts
+                if text_parts:
+                    intermediate_thoughts.append("".join(text_parts))
+                
                 log_thought(f"Deep Analysis: Executing {len(function_calls)} tool call(s)...")
                 
                 # Execute tools in parallel
@@ -1158,60 +1210,14 @@ def run_deep_analysis(question: str):
                     for fn in function_calls:
                         log_debug(f"Tool Call: {fn.name}, Args: {fn.args}")
                         if fn.name == "get_insights":
-                            if isinstance(fn.args, list):
-                                args_dict = {}
-                                for arg in fn.args:
-                                    if isinstance(arg, dict):
-                                        args_dict.update(arg)
-                            elif isinstance(fn.args, dict):
-                                args_dict = fn.args
-                            else:
-                                import json
-                                try:
-                                    loaded = json.loads(fn.args)
-                                    if isinstance(loaded, dict):
-                                        args_dict = loaded
-                                    elif isinstance(loaded, list):
-                                        args_dict = {}
-                                        for item in loaded:
-                                            if isinstance(item, dict):
-                                                args_dict.update(item)
-                                    else:
-                                        args_dict = {}
-                                except:
-                                    args_dict = {}
-                            
-                            question_arg = args_dict.get("question") or args_dict.get("query")
-                            if not question_arg:
-                                question_arg = list(args_dict.values())[0] if args_dict else ""
-                                
+                            question_arg = extract_tool_argument(fn.args, ["question", "query"])
                             futures.append(executor.submit(get_insights, question_arg))
                         elif fn.name == "query_spanner":
-                            if isinstance(fn.args, list):
-                                args_dict = {}
-                                for arg in fn.args:
-                                    if isinstance(arg, dict):
-                                        args_dict.update(arg)
-                            elif isinstance(fn.args, dict):
-                                args_dict = fn.args
-                            else:
-                                import json
-                                try:
-                                    loaded = json.loads(fn.args)
-                                    if isinstance(loaded, dict):
-                                        args_dict = loaded
-                                    elif isinstance(loaded, list):
-                                        args_dict = {}
-                                        for item in loaded:
-                                            if isinstance(item, dict):
-                                                args_dict.update(item)
-                                    else:
-                                        args_dict = {}
-                                except:
-                                    args_dict = {}
-                                    
-                            sql_arg = args_dict.get("sql")
+                            sql_arg = extract_tool_argument(fn.args, ["sql"])
                             futures.append(executor.submit(query_spanner, sql_arg))
+                        elif fn.name == "generate_chart":
+                            data_and_question_arg = extract_tool_argument(fn.args, ["data_and_question"])
+                            futures.append(executor.submit(generate_chart_config, data_and_question_arg))
                         else:
                             log_debug(f"Unknown tool: {fn.name}")
                             futures.append(None)
@@ -1252,19 +1258,29 @@ def run_deep_analysis(question: str):
             elif text_parts:
                 # Text response (Final answer)
                 full_text = "".join(text_parts)
+                if intermediate_thoughts:
+                    full_text = "\n\n".join(intermediate_thoughts) + "\n\n" + full_text
                 yield {'content': {'parts': [{'text': full_text}]}}
                 break
             else:
                 # No content?
+                if intermediate_thoughts:
+                    yield {'content': {'parts': [{'text': "\n\n".join(intermediate_thoughts)}]}}
                 break
         else:
             # If we hit the max iterations without breaking, yield a final message
-            yield {'content': {'parts': [{'text': "I have analyzed the data extensively but reached my maximum reasoning limit. Please try breaking down your question into smaller, more specific pieces."}]}}
+            full_text = "I have analyzed the data extensively but reached my maximum reasoning limit. Please try breaking down your question into smaller, more specific pieces."
+            if intermediate_thoughts:
+                full_text = "\n\n".join(intermediate_thoughts) + "\n\n" + full_text
+            yield {'content': {'parts': [{'text': full_text}]}}
     except Exception as e:
         log_thought(f"Deep Analysis Error: {e}")
-        yield {'content': {'parts': [{'text': f"An error occurred during deep analysis: {e}"}]}}
+        full_text = f"An error occurred during deep analysis: {e}"
+        if intermediate_thoughts:
+            full_text = "\n\n".join(intermediate_thoughts) + "\n\n" + full_text
+        yield {'content': {'parts': [{'text': full_text}]}}
 
-def perform_deep_analysis(question: str):
+def perform_deep_analysis(question: str, model_name: str = None):
     """Performs a deep, multi-step analysis for complex questions.
     
     Use this tool when the user asks for:
@@ -1275,6 +1291,7 @@ def perform_deep_analysis(question: str):
     
     Args:
         question: The complex user question to analyze.
+        model_name: The optional model name to run the analysis on.
         
     Returns:
         A comprehensive markdown report with charts and data.
@@ -1282,7 +1299,7 @@ def perform_deep_analysis(question: str):
     full_report = ""
     try:
         # We need to consume the generator here since tools must return a value, not a generator
-        for chunk in run_deep_analysis(question):
+        for chunk in run_deep_analysis(question, model_name=model_name):
             content = chunk.get('content', {})
             parts = content.get('parts', [])
             for part in parts:
@@ -1356,7 +1373,20 @@ visualization_agent = Agent(
     """
 )
 
-
+def generate_chart_config(data_and_question: str) -> str:
+    """Generates the specific JSON configuration required for rendering charts from data and a question."""
+    log_debug(f"Calling visualization agent with: {data_and_question[:200]}...")
+    model = GenerativeModel(
+        "gemini-3.5-flash",
+        system_instruction=visualization_agent.instruction
+    )
+    response = retry_api_call(
+        lambda: model.generate_content(data_and_question),
+        retries=3,
+        delay=2,
+        error_msg="Visualization agent call failed"
+    )
+    return response.text
 
 unified_agent = Agent(
     model="gemini-3.5-flash",
@@ -1435,9 +1465,9 @@ class DeepAnalysisApp:
     Wrapper for Deep Analysis mode to function as an App for server.py.
     Bypasses the Unified Agent router for lower latency.
     """
-    def stream_query(self, message: str, user_id: str = None, session_id: str = None):
+    def stream_query(self, message: str, user_id: str = None, session_id: str = None, model_name: str = None):
         # Directly invoke the generator
-        return run_deep_analysis(message)
+        return run_deep_analysis(message, model_name=model_name)
 
     def get_session(self, *args, **kwargs):
         pass
@@ -1470,3 +1500,461 @@ def get_agent_app(agent_type="fast"):
     elif agent_type == "deep":
         return deep_app
     return app
+
+
+def extract_single_number(res):
+    try:
+        if res and res.get('status') == 'success' and 'data_insights' in res:
+            data_ins = res['data_insights']
+            if data_ins and isinstance(data_ins, list):
+                result = data_ins[0].get('result', {})
+                rows = result.get('data') or result.get('rows') or []
+                if rows:
+                    row = rows[0]
+                    for k, v in row.items():
+                        if isinstance(v, (int, float)):
+                            return v
+                        elif isinstance(v, str):
+                            try:
+                                clean_str = v.replace('$', '').replace(',', '').strip()
+                                if '.' in clean_str:
+                                    return float(clean_str)
+                                return int(clean_str)
+                            except ValueError:
+                                pass
+    except Exception as e:
+        log_debug(f"Error extracting single number: {e}")
+    return 0
+
+
+def extract_trend_data(res):
+    try:
+        if res and res.get('status') == 'success' and 'data_insights' in res:
+            data_ins = res['data_insights']
+            if data_ins and isinstance(data_ins, list):
+                result = data_ins[0].get('result', {})
+                return result.get('data') or result.get('rows') or []
+    except Exception as e:
+        log_debug(f"Error extracting trend data: {e}")
+    return []
+
+
+def build_looker_explore_url(fields, filters):
+    """
+    Builds a prebuilt Looker Explore URL based on fields and filters.
+    """
+    import urllib.parse
+    base_uri = LOOKER_INSTANCE_URI.rstrip('/')
+    params = []
+    
+    # Add fields
+    if fields:
+        fields_str = ",".join(fields)
+        params.append(("fields", fields_str))
+        
+    # Add filters
+    if filters and isinstance(filters, dict):
+        for k, v in filters.items():
+            params.append((f"f[{k}]", str(v)))
+            
+    query_str = urllib.parse.urlencode(params)
+    return f"{base_uri}/explore/{LOOKML_MODEL}/{EXPLORE}?{query_str}&toggle=dat,pik,vis"
+
+
+def generate_daily_summary(force_refresh=False):
+    """
+    Generates a daily summary of gaming metrics.
+    Caches the results to a local file for quick loads.
+    """
+    import datetime
+    
+    cache_path = "datasets/events_daily_summary_cache.json"
+    if not force_refresh and os.path.exists(cache_path):
+        try:
+            with open(cache_path, "r") as f:
+                cached_data = json.load(f)
+            # Basic validation of cached data
+            if "timestamp" in cached_data and "games" in cached_data:
+                log_debug("Returning cached daily summary.")
+                return cached_data
+        except Exception as e:
+            log_debug(f"Error reading daily summary cache: {e}")
+
+    log_thought("Generating new Daily AI Summary insights...")
+    
+    question_overall = "Daily total revenue, total iap revenue, total ad revenue, active users, number of sessions, new users, and Day 1 retention rate for the last 7 days ending yesterday"
+    question_by_game = "Daily total revenue, total iap revenue, total ad revenue, active users, number of sessions, new users, and Day 1 retention rate for the last 7 days ending yesterday, broken down by game name"
+    
+    raw_res_overall = None
+    raw_res_by_game = None
+    import time
+    
+    # 1. Run overall query
+    for attempt in range(3):
+        try:
+            log_debug(f"Running Looker query (attempt {attempt+1}): '{question_overall}'")
+            res = get_insights(question_overall)
+            if res and res.get('status') == 'success' and 'data_insights' in res:
+                raw_res_overall = res
+                break
+        except Exception as e:
+            log_debug(f"Attempt {attempt+1} failed: {e}")
+        if attempt < 2:
+            time.sleep(2 ** attempt)
+
+    # 2. Run by-game query
+    for attempt in range(3):
+        try:
+            log_debug(f"Running Looker query (attempt {attempt+1}): '{question_by_game}'")
+            res = get_insights(question_by_game)
+            if res and res.get('status') == 'success' and 'data_insights' in res:
+                raw_res_by_game = res
+                break
+        except Exception as e:
+            log_debug(f"Attempt {attempt+1} failed: {e}")
+        if attempt < 2:
+            time.sleep(2 ** attempt)
+
+    # Helper function to extract value with key prefix tolerance
+    def get_val(row, key, default=0.0):
+        val = row.get(key)
+        if val is None:
+            for k, v in row.items():
+                if k.endswith("." + key) or k == key:
+                    val = v
+                    break
+        if val is None:
+            return default
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return default
+            
+    def get_change(curr, prev):
+        if not prev or prev == 0:
+            return 0.0
+        return round(((curr - prev) / prev) * 100.0, 2)
+
+    def process_dataset(trend_data):
+        trend_data = sorted(trend_data, key=lambda x: x.get("events.event_date", ""))
+        yesterday_row = trend_data[-1] if len(trend_data) >= 1 else {}
+        day_before_row = trend_data[-2] if len(trend_data) >= 2 else {}
+        
+        yesterday_rev = get_val(yesterday_row, "total_revenue")
+        day_before_rev = get_val(day_before_row, "total_revenue")
+        
+        yesterday_iap = get_val(yesterday_row, "total_iap_revenue")
+        day_before_iap = get_val(day_before_row, "total_iap_revenue")
+        
+        yesterday_ad = get_val(yesterday_row, "total_ad_revenue")
+        day_before_ad = get_val(day_before_row, "total_ad_revenue")
+        
+        yesterday_dau = get_val(yesterday_row, "number_of_users")
+        day_before_dau = get_val(day_before_row, "number_of_users")
+        
+        yesterday_new_users = get_val(yesterday_row, "number_of_new_users")
+        day_before_new_users = get_val(day_before_row, "number_of_new_users")
+        
+        yesterday_sess = get_val(yesterday_row, "number_of_sesssions")
+        day_before_sess = get_val(day_before_row, "number_of_sesssions")
+        
+        yesterday_ret = get_val(yesterday_row, "d1_retention_rate")
+        day_before_ret = get_val(day_before_row, "d1_retention_rate")
+        
+        yesterday_ret_pct = round(yesterday_ret * 100.0, 2)
+        day_before_ret_pct = round(day_before_ret * 100.0, 2)
+        
+        revenue_change = get_change(yesterday_rev, day_before_rev)
+        iap_change = get_change(yesterday_iap, day_before_iap)
+        ad_change = get_change(yesterday_ad, day_before_ad)
+        dau_change = get_change(yesterday_dau, day_before_dau)
+        new_users_change = get_change(yesterday_new_users, day_before_new_users)
+        sessions_change = get_change(yesterday_sess, day_before_sess)
+        ret_change = round(yesterday_ret_pct - day_before_ret_pct, 2)
+        
+        return {
+            "metrics": {
+                "revenue": {
+                    "value": yesterday_rev, 
+                    "change": revenue_change,
+                    "iap_value": yesterday_iap,
+                    "iap_change": iap_change,
+                    "ad_value": yesterday_ad,
+                    "ad_change": ad_change
+                },
+                "dau": {
+                    "value": yesterday_dau, 
+                    "change": dau_change,
+                    "new_users_value": yesterday_new_users,
+                    "new_users_change": new_users_change
+                },
+                "sessions": {
+                    "value": yesterday_sess, 
+                    "change": sessions_change
+                },
+                "retention": {
+                    "value": yesterday_ret_pct, 
+                    "change": ret_change
+                }
+            },
+            "trends": trend_data
+        }
+
+    # Extract raw data lists
+    trend_overall = []
+    if raw_res_overall:
+        trend_overall = extract_trend_data(raw_res_overall)
+        
+    trend_by_game = []
+    if raw_res_by_game:
+        trend_by_game = extract_trend_data(raw_res_by_game)
+        
+    # Group by game
+    battle_royale_trend = [r for r in trend_by_game if r.get("events.game_name") == "Lookup Battle Royale"]
+    farm_trend = [r for r in trend_by_game if r.get("events.game_name") == "Lookerwood Farm"]
+    
+    # Process each dataset
+    overall_processed = process_dataset(trend_overall)
+    br_processed = process_dataset(battle_royale_trend)
+    farm_processed = process_dataset(farm_trend)
+
+    # Prompt Gemini for narrative synthesis on the whole comparative data
+    prompt = f"""
+    You are an expert Gaming Product Analyst. Analyze the following daily performance metrics and 7-day trend data for our two games and the overall business, and synthesize a daily insights dashboard report.
+    
+    Games:
+    1. Lookup Battle Royale (High volume, IAP monetization model)
+    2. Lookerwood Farm (Medium volume, Ad monetization model)
+    
+    OVERALL aggregated Yesterday's Metrics:
+    - Total Revenue: ${overall_processed['metrics']['revenue']['value']:,} ({overall_processed['metrics']['revenue']['change']:+}% vs day before)
+      - IAP: ${overall_processed['metrics']['revenue']['iap_value']:,} ({overall_processed['metrics']['revenue']['iap_change']:+}% vs day before)
+      - Ads: ${overall_processed['metrics']['revenue']['ad_value']:,} ({overall_processed['metrics']['revenue']['ad_change']:+}% vs day before)
+    - DAU: {overall_processed['metrics']['dau']['value']:,} ({overall_processed['metrics']['dau']['change']:+}% vs day before)
+      - New Users: {overall_processed['metrics']['dau']['new_users_value']:,} ({overall_processed['metrics']['dau']['new_users_change']:+}% vs day before)
+    - Sessions: {overall_processed['metrics']['sessions']['value']:,} ({overall_processed['metrics']['sessions']['change']:+}% vs day before)
+    - Day 1 Retention: {overall_processed['metrics']['retention']['value']}% ({overall_processed['metrics']['retention']['change']:+}% pts vs day before)
+    
+    LOOKUP BATTLE ROYALE Yesterday's Metrics:
+    - Total Revenue: ${br_processed['metrics']['revenue']['value']:,} ({br_processed['metrics']['revenue']['change']:+}% vs day before)
+      - IAP: ${br_processed['metrics']['revenue']['iap_value']:,} ({br_processed['metrics']['revenue']['iap_change']:+}% vs day before)
+      - Ads: ${br_processed['metrics']['revenue']['ad_value']:,} ({br_processed['metrics']['revenue']['ad_change']:+}% vs day before)
+    - DAU: {br_processed['metrics']['dau']['value']:,} ({br_processed['metrics']['dau']['change']:+}% vs day before)
+      - New Users: {br_processed['metrics']['dau']['new_users_value']:,} ({br_processed['metrics']['dau']['new_users_change']:+}% vs day before)
+    - Sessions: {br_processed['metrics']['sessions']['value']:,} ({br_processed['metrics']['sessions']['change']:+}% vs day before)
+    - Day 1 Retention: {br_processed['metrics']['retention']['value']}% ({br_processed['metrics']['retention']['change']:+}% pts vs day before)
+    
+    LOOKERWOOD FARM Yesterday's Metrics:
+    - Total Revenue: ${farm_processed['metrics']['revenue']['value']:,} ({farm_processed['metrics']['revenue']['change']:+}% vs day before)
+      - IAP: ${farm_processed['metrics']['revenue']['iap_value']:,} ({farm_processed['metrics']['revenue']['iap_change']:+}% vs day before)
+      - Ads: ${farm_processed['metrics']['revenue']['ad_value']:,} ({farm_processed['metrics']['revenue']['ad_change']:+}% vs day before)
+    - DAU: {farm_processed['metrics']['dau']['value']:,} ({farm_processed['metrics']['dau']['change']:+}% vs day before)
+      - New Users: {farm_processed['metrics']['dau']['new_users_value']:,} ({farm_processed['metrics']['dau']['new_users_change']:+}% vs day before)
+    - Sessions: {farm_processed['metrics']['sessions']['value']:,} ({farm_processed['metrics']['sessions']['change']:+}% vs day before)
+    - Day 1 Retention: {farm_processed['metrics']['retention']['value']}% ({farm_processed['metrics']['retention']['change']:+}% pts vs day before)
+    
+    Raw 7-Day Trend Data (by Game and Overall):
+    - Overall: {json.dumps(overall_processed['trends'])}
+    - Lookup Battle Royale: {json.dumps(br_processed['trends'])}
+    - Lookerwood Farm: {json.dumps(farm_processed['trends'])}
+    
+    Instructions:
+    1. Write a compelling, high-level "game_comparison" narrative (markdown format, about 200 words) summarizing the performance differences between Lookup Battle Royale (IAP-driven) and Lookerwood Farm (Ad-driven). Contrast their monetization mechanics, player retention quality, and operational health.
+    
+    2. For each view ("overall", "battle_royale", "farm"), generate:
+       - A descriptive, high-quality qualitative "executive_summary" (markdown format, about 100-150 words).
+       - 3-5 key "highlights" (list of strings) capturing major performance shifts.
+       - 3-5 "action_items" representing actionable recommendations. Format each action item EXACTLY as an object with these keys:
+         - "text": "Detailed recommendation description...",
+         - "fields": ["events.event_date", "events.total_ad_revenue", ...],
+         - "filters": {{"events.game_name": "Lookerwood Farm", ...}}
+         Only use valid dimensions and measures from the 'events' explore.
+       - Recharts configurations for `revenue_mix_trend` (stacked area chart of IAP vs Ad revenue) and `dau_retention_trend` (combo chart: DAU bars on left y-axis, D1 Retention Rate line on right y-axis).
+       
+       Format `revenue_mix_trend` EXACTLY as follows:
+       {{
+         "type": "area",
+         "xAxisKey": "date",
+         "stacked": true,
+         "data": [
+           {{"date": "YYYY-MM-DD", "iap": 12345, "ad": 6789}},
+           ...
+         ],
+         "series": [
+           {{"name": "IAP Revenue", "dataKey": "iap", "strokeColor": "hsl(var(--primary))", "fillColor": "hsla(var(--primary), 0.3)"}},
+           {{"name": "Ad Revenue", "dataKey": "ad", "strokeColor": "hsl(var(--chart-2))", "fillColor": "hsla(var(--chart-2), 0.3)"}}
+         ],
+         "title": "7-Day Revenue Mix Trend (IAP vs. Ads)"
+       }}
+       
+       Format `dau_retention_trend` EXACTLY as follows:
+       {{
+         "type": "combo",
+         "xAxisKey": "date",
+         "data": [
+           {{"date": "YYYY-MM-DD", "dau": 123456, "retention": 5.56}},
+           ...
+         ],
+         "series": [
+           {{"type": "bar", "name": "DAU", "dataKey": "dau", "fillColor": "hsla(var(--primary), 0.2)", "strokeColor": "hsl(var(--primary))", "yAxisID": "left"}},
+           {{"type": "line", "name": "D1 Retention Rate (%)", "dataKey": "retention", "strokeColor": "hsl(var(--chart-3))", "fillColor": "hsl(var(--chart-3))", "yAxisID": "right"}}
+         ],
+         "title": "7-Day Active Users & Retention Trend"
+       }}
+       
+       Make sure the dates are formatted as YYYY-MM-DD. Retention must be a percentage float (e.g. 0.054 -> 5.4).
+       
+    You MUST return ONLY a valid JSON object. Do not include markdown code block formatting like ```json ... ``` or any other surrounding text.
+    Return a single JSON object with these EXACT keys:
+    - "game_comparison"
+    - "overall": {{ "executive_summary": "...", "highlights": [...], "action_items": [{{"text": "...", "fields": [...], "filters": {{...}}}}, ...], "revenue_mix_trend": {{...}}, "dau_retention_trend": {{...}} }}
+    - "battle_royale": {{ "executive_summary": "...", "highlights": [...], "action_items": [{{"text": "...", "fields": [...], "filters": {{...}}}}, ...], "revenue_mix_trend": {{...}}, "dau_retention_trend": {{...}} }}
+    - "farm": {{ "executive_summary": "...", "highlights": [...], "action_items": [{{"text": "...", "fields": [...], "filters": {{...}}}}, ...], "revenue_mix_trend": {{...}}, "dau_retention_trend": {{...}} }}
+    """
+
+    model_name = os.getenv("DEEP_MODE_MODEL", "gemini-3.5-flash")
+    from vertexai.generative_models import GenerativeModel
+    model = GenerativeModel(model_name)
+    
+    try:
+        response = retry_api_call(
+            lambda: model.generate_content(prompt),
+            retries=3,
+            delay=2,
+            error_msg="Daily summary synthesis failed"
+        )
+        response_text = response.text.strip()
+        
+        # Strip markdown code block wrappers if present
+        if response_text.startswith("```"):
+            lines = response_text.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines[-1].startswith("```"):
+                lines = lines[:-1]
+            response_text = "\n".join(lines).strip()
+            
+        summary_json = json.loads(response_text)
+    except Exception as e:
+        log_debug(f"Failed to generate daily summary narrative: {e}")
+        summary_json = None
+        if 'response_text' in locals():
+            try:
+                start_idx = response_text.find("{")
+                end_idx = response_text.rfind("}")
+                if start_idx != -1 and end_idx != -1:
+                    summary_json = json.loads(response_text[start_idx:end_idx+1])
+            except Exception as e2:
+                log_debug(f"Failed to extract JSON substring: {e2}")
+        
+        if not summary_json:
+            # Simple fallback structure
+            summary_json = {
+                "game_comparison": "Lookerwood Farm and Lookup Battle Royale comparison.",
+                "overall": {
+                    "executive_summary": "Overall metrics overview.",
+                    "highlights": ["Highlights not generated."],
+                    "action_items": [{"text": "Monitor overall performance metrics.", "fields": ["events.event_date", "events.total_revenue"], "filters": {}}],
+                    "revenue_mix_trend": {"type": "area", "xAxisKey": "date", "stacked": True, "data": [], "series": [{"name": "IAP Revenue", "dataKey": "iap", "strokeColor": "hsl(var(--primary))", "fillColor": "hsla(var(--primary), 0.3)"}, {"name": "Ad Revenue", "dataKey": "ad", "strokeColor": "hsl(var(--chart-2))", "fillColor": "hsla(var(--chart-2), 0.3)"}], "title": "7-Day Revenue Mix Trend (IAP vs. Ads)"},
+                    "dau_retention_trend": {"type": "combo", "xAxisKey": "date", "data": [], "series": [{"type": "bar", "name": "DAU", "dataKey": "dau", "fillColor": "hsla(var(--primary), 0.2)", "strokeColor": "hsl(var(--primary))", "yAxisID": "left"}, {"type": "line", "name": "D1 Retention Rate (%)", "dataKey": "retention", "strokeColor": "hsl(var(--chart-3))", "fillColor": "hsl(var(--chart-3))", "yAxisID": "right"}], "title": "7-Day Active Users & Retention Trend"}
+                },
+                "battle_royale": {
+                    "executive_summary": "Lookup Battle Royale metrics overview.",
+                    "highlights": [],
+                    "action_items": [{"text": "Analyze Battle Royale In-App Purchase trends.", "fields": ["events.event_date", "events.total_iap_revenue"], "filters": {"events.game_name": "Lookup Battle Royale"}}],
+                    "revenue_mix_trend": {"type": "area", "xAxisKey": "date", "stacked": True, "data": [], "series": [{"name": "IAP Revenue", "dataKey": "iap", "strokeColor": "hsl(var(--primary))", "fillColor": "hsla(var(--primary), 0.3)"}, {"name": "Ad Revenue", "dataKey": "ad", "strokeColor": "hsl(var(--chart-2))", "fillColor": "hsla(var(--chart-2), 0.3)"}], "title": "7-Day Revenue Mix Trend (IAP vs. Ads)"},
+                    "dau_retention_trend": {"type": "combo", "xAxisKey": "date", "data": [], "series": [{"type": "bar", "name": "DAU", "dataKey": "dau", "fillColor": "hsla(var(--primary), 0.2)", "strokeColor": "hsl(var(--primary))", "yAxisID": "left"}, {"type": "line", "name": "D1 Retention Rate (%)", "dataKey": "retention", "strokeColor": "hsl(var(--chart-3))", "fillColor": "hsl(var(--chart-3))", "yAxisID": "right"}], "title": "7-Day Active Users & Retention Trend"}
+                },
+                "farm": {
+                    "executive_summary": "Lookerwood Farm metrics overview.",
+                    "highlights": [],
+                    "action_items": [{"text": "Investigate Farm ad network and ad revenue trends.", "fields": ["events.event_date", "events.total_ad_revenue"], "filters": {"events.game_name": "Lookerwood Farm"}}],
+                    "revenue_mix_trend": {"type": "area", "xAxisKey": "date", "stacked": True, "data": [], "series": [{"name": "IAP Revenue", "dataKey": "iap", "strokeColor": "hsl(var(--primary))", "fillColor": "hsla(var(--primary), 0.3)"}, {"name": "Ad Revenue", "dataKey": "ad", "strokeColor": "hsl(var(--chart-2))", "fillColor": "hsla(var(--chart-2), 0.3)"}], "title": "7-Day Revenue Mix Trend (IAP vs. Ads)"},
+                    "dau_retention_trend": {"type": "combo", "xAxisKey": "date", "data": [], "series": [{"type": "bar", "name": "DAU", "dataKey": "dau", "fillColor": "hsla(var(--primary), 0.2)", "strokeColor": "hsl(var(--primary))", "yAxisID": "left"}, {"type": "line", "name": "D1 Retention Rate (%)", "dataKey": "retention", "strokeColor": "hsl(var(--chart-3))", "fillColor": "hsl(var(--chart-3))", "yAxisID": "right"}], "title": "7-Day Active Users & Retention Trend"}
+                }
+            }
+
+    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    def process_action_items(action_items_raw):
+        processed = []
+        if not action_items_raw or not isinstance(action_items_raw, list):
+            return [{
+                "text": "Monitor performance metrics and system health.",
+                "explore_url": build_looker_explore_url(["events.event_date", "events.total_revenue"], {})
+            }]
+            
+        for item in action_items_raw:
+            if not isinstance(item, dict):
+                processed.append({
+                    "text": str(item),
+                    "explore_url": build_looker_explore_url(["events.event_date", "events.total_revenue"], {})
+                })
+                continue
+                
+            text = item.get("text", "Prebuilt Analysis")
+            fields = item.get("fields", ["events.event_date", "events.total_revenue"])
+            filters = item.get("filters", {})
+            
+            explore_url = build_looker_explore_url(fields, filters)
+            processed.append({
+                "text": text,
+                "explore_url": explore_url
+            })
+            
+        return processed
+
+    # Structure games payloads
+    final_output = {
+        "timestamp": current_time,
+        "game_comparison": summary_json.get("game_comparison", ""),
+        "games": {
+            "overall": {
+                "metrics": overall_processed["metrics"],
+                "narrative": {
+                    "executive_summary": summary_json.get("overall", {}).get("executive_summary", ""),
+                    "highlights": summary_json.get("overall", {}).get("highlights", []),
+                    "action_items": process_action_items(summary_json.get("overall", {}).get("action_items", []))
+                },
+                "charts": {
+                    "revenue_mix": summary_json.get("overall", {}).get("revenue_mix_trend"),
+                    "dau_retention": summary_json.get("overall", {}).get("dau_retention_trend")
+                }
+            },
+            "battle_royale": {
+                "metrics": br_processed["metrics"],
+                "narrative": {
+                    "executive_summary": summary_json.get("battle_royale", {}).get("executive_summary", ""),
+                    "highlights": summary_json.get("battle_royale", {}).get("highlights", []),
+                    "action_items": process_action_items(summary_json.get("battle_royale", {}).get("action_items", []))
+                },
+                "charts": {
+                    "revenue_mix": summary_json.get("battle_royale", {}).get("revenue_mix_trend"),
+                    "dau_retention": summary_json.get("battle_royale", {}).get("dau_retention_trend")
+                }
+            },
+            "farm": {
+                "metrics": farm_processed["metrics"],
+                "narrative": {
+                    "executive_summary": summary_json.get("farm", {}).get("executive_summary", ""),
+                    "highlights": summary_json.get("farm", {}).get("highlights", []),
+                    "action_items": process_action_items(summary_json.get("farm", {}).get("action_items", []))
+                },
+                "charts": {
+                    "revenue_mix": summary_json.get("farm", {}).get("revenue_mix_trend"),
+                    "dau_retention": summary_json.get("farm", {}).get("dau_retention_trend")
+                }
+            }
+        }
+    }
+    
+    # Save cache
+    try:
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        with open(cache_path, "w") as f:
+            json.dump(final_output, f, indent=2)
+        log_debug(f"Saved daily summary to cache: {cache_path}")
+    except Exception as e:
+        log_debug(f"Failed to write cache file: {e}")
+        
+    return final_output
