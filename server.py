@@ -931,14 +931,42 @@ def stream_agent_workflow():
                     {"step": 9, "status": "success", "message": "Ad Bids adjusted successfully! Estimated revenue impact: +$1,200/day."}
                 ]
             elif workflow_id == 'deploy_gcf':
-                steps = [
-                    {"step": 1, "status": "info", "message": "Generating Python source code for Cloud Function: 'cohort-correlation-analyzer'..."},
-                    {"step": 2, "status": "info", "message": "Creating bundle containing function code and requirements.txt..."},
-                    {"step": 3, "status": "executing", "message": "Uploading function package to Google Cloud Storage bucket gs://ca_api/functions/..."},
-                    {"step": 4, "status": "executing", "message": "Executing gcloud deployment command: 'gcloud functions deploy cohort-correlation-analyzer' (simulated)..."},
-                    {"step": 5, "status": "info", "message": "Provisioning Cloud Function resources & configuring IAM invoker permissions..."},
-                    {"step": 6, "status": "success", "message": "Cloud Function successfully deployed! Endpoint: https://us-central1-aragosalooker.cloudfunctions.net/cohort-correlation-analyzer"}
-                ]
+                action = request.args.get('action')
+                if action == 'pause':
+                    steps = [
+                        {"step": 1, "status": "info", "message": "Connecting to Google Cloud Functions service..."},
+                        {"step": 2, "status": "executing", "message": "Suspending Cloud Scheduler event trigger for 'cohort-correlation-analyzer'..."},
+                        {"step": 3, "status": "info", "message": "Disabling periodic analytics ingestion pipelines..."},
+                        {"step": 4, "status": "success", "message": "Cloud Function pipeline successfully paused! Status set to SUSPENDED."}
+                    ]
+                elif action == 'resume':
+                    steps = [
+                        {"step": 1, "status": "info", "message": "Connecting to Google Cloud Functions service..."},
+                        {"step": 2, "status": "executing", "message": "Resuming Cloud Scheduler event trigger for 'cohort-correlation-analyzer'..."},
+                        {"step": 3, "status": "info", "message": "Re-activating periodic analytics ingestion pipelines..."},
+                        {"step": 4, "status": "success", "message": "Cloud Function pipeline successfully resumed! Status set to ACTIVE."}
+                    ]
+                elif action == 'update_settings':
+                    schedule = request.args.get('schedule', '0 8 * * *')
+                    target = request.args.get('target', 'All Active Players')
+                    email = request.args.get('email', 'portfolio-leads@altostrat.com')
+                    threshold = request.args.get('threshold', '10%')
+                    steps = [
+                        {"step": 1, "status": "info", "message": "Retrieving deployed metadata for Cloud Function: 'cohort-correlation-analyzer'..."},
+                        {"step": 2, "status": "executing", "message": f"Updating Cron trigger schedule to: '{schedule}'..."},
+                        {"step": 3, "status": "executing", "message": f"Injecting environment variables: TARGET_SEGMENT='{target}', ALERT_EMAIL='{email}', THRESHOLD='{threshold}'..."},
+                        {"step": 4, "status": "info", "message": "Deploying updated configurations & performing verification health check..."},
+                        {"step": 5, "status": "success", "message": "Cloud Function pipeline configuration updated successfully! New settings are live."}
+                    ]
+                else:
+                    steps = [
+                        {"step": 1, "status": "info", "message": "Generating Python source code for Cloud Function: 'cohort-correlation-analyzer'..."},
+                        {"step": 2, "status": "info", "message": "Creating bundle containing function code and requirements.txt..."},
+                        {"step": 3, "status": "executing", "message": "Uploading function package to Google Cloud Storage bucket gs://ca_api/functions/..."},
+                        {"step": 4, "status": "executing", "message": "Executing gcloud deployment command: 'gcloud functions deploy cohort-correlation-analyzer' (simulated)..."},
+                        {"step": 5, "status": "info", "message": "Provisioning Cloud Function resources & configuring IAM invoker permissions..."},
+                        {"step": 6, "status": "success", "message": "Cloud Function successfully deployed! Endpoint: https://us-central1-aragosalooker.cloudfunctions.net/cohort-correlation-analyzer"}
+                    ]
             else:
                 steps = [
                     {"step": 1, "status": "error", "message": "Unknown workflow ID requested."}

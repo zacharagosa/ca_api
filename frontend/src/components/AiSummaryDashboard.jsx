@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, Sparkles, TrendingUp, TrendingDown, DollarSign, Users, Activity, Clock, ExternalLink, Play, Terminal, X, Loader2, CheckCircle } from 'lucide-react';
+import { RefreshCw, Sparkles, TrendingUp, TrendingDown, DollarSign, Users, Activity, Clock, ExternalLink, Play, Terminal, X, Loader2, CheckCircle, Settings, Pause, Sliders, AlertTriangle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import ChartRenderer from './ChartRenderer';
@@ -64,16 +64,33 @@ const AiSummaryDashboard = () => {
   const [isWorkflowModalOpen, setIsWorkflowModalOpen] = useState(false);
   const eventSourceRef = useRef(null);
 
-  const runWorkflow = (workflowId) => {
+  // GCF Pipeline Manager State
+  const [isGcfPaused, setIsGcfPaused] = useState(false);
+  const [gcfSchedule, setGcfSchedule] = useState('0 8 * * *');
+  const [gcfTargetSegment, setGcfTargetSegment] = useState('All Active Players');
+  const [gcfAlertEmail, setGcfAlertEmail] = useState('portfolio-leads@altostrat.com');
+  const [gcfThreshold, setGcfThreshold] = useState('10%');
+  const [showGcfSettings, setShowGcfSettings] = useState(false);
+  const [gcfAction, setGcfAction] = useState(null);
+
+  const runWorkflow = (workflowId, action = null) => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
     }
     setWorkflowLogs([]);
     setWorkflowStatus('running');
     setActiveWorkflow(workflowId);
+    setGcfAction(action);
     setIsWorkflowModalOpen(true);
 
-    const streamUrl = `${API_BASE_URL}/api/agent-workflow/stream?workflow_id=${workflowId}`;
+    let streamUrl = `${API_BASE_URL}/api/agent-workflow/stream?workflow_id=${workflowId}`;
+    if (action) {
+      streamUrl += `&action=${action}`;
+      if (action === 'update_settings') {
+        streamUrl += `&schedule=${encodeURIComponent(gcfSchedule)}&target=${encodeURIComponent(gcfTargetSegment)}&email=${encodeURIComponent(gcfAlertEmail)}&threshold=${encodeURIComponent(gcfThreshold)}`;
+      }
+    }
+    
     const eventSource = new EventSource(streamUrl);
     eventSourceRef.current = eventSource;
 
@@ -85,6 +102,13 @@ const AiSummaryDashboard = () => {
         if (stepData.status === 'success') {
           setWorkflowStatus('success');
           eventSource.close();
+          if (workflowId === 'deploy_gcf') {
+            if (action === 'pause') {
+              setIsGcfPaused(true);
+            } else if (action === 'resume') {
+              setIsGcfPaused(false);
+            }
+          }
         } else if (stepData.status === 'error') {
           setWorkflowStatus('error');
           eventSource.close();
@@ -796,28 +820,158 @@ const AiSummaryDashboard = () => {
                   </div>
                 </div>
 
-                {/* Provision Cohort Analyzer */}
-                <div className="p-3.5 rounded-xl border border-border/40 bg-card/25 hover:border-indigo-500/40 hover:bg-card/35 transition-all duration-300">
-                  <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+                {/* Analytics GCF Pipeline Manager */}
+                <div className="p-4 rounded-xl border border-border/40 bg-card/25 hover:border-indigo-500/40 transition-all duration-300 space-y-4">
+                  <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 border-b border-border/20 pb-3">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
                           Infrastructure
                         </span>
-                        <h4 className="text-sm font-semibold text-foreground">Deploy Analytics GCF</h4>
+                        <h4 className="text-sm font-semibold text-foreground">Cohort Analytics Pipeline</h4>
+                        <div className="flex items-center gap-1.5 ml-2">
+                          <span className={`h-2 w-2 rounded-full ${isGcfPaused ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400 animate-pulse'}`} />
+                          <span className="text-[10px] font-medium text-muted-foreground">
+                            {isGcfPaused ? 'Paused' : 'Active'}
+                          </span>
+                        </div>
                       </div>
                       <p className="text-xs text-muted-foreground leading-relaxed">
-                        Compiles, packages, and deploys a secure Google Cloud Function to generate user cohort correlation insights.
+                        Secure Google Cloud Function that compiles and analyzes daily cohort performance. Deployed & operational.
                       </p>
                     </div>
-                    <Button 
-                      onClick={() => runWorkflow('deploy_gcf')}
-                      className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-xs px-3.5 py-1.5 h-8 font-semibold text-white transition-all active:scale-95 shrink-0 self-end sm:self-center"
-                    >
-                      <Play size={10} className="fill-current" />
-                      <span>Deploy</span>
-                    </Button>
+
+                    <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                      <Button
+                        onClick={() => runWorkflow('deploy_gcf', isGcfPaused ? 'resume' : 'pause')}
+                        variant="outline"
+                        className={`text-xs px-3 py-1.5 h-8 font-semibold transition-all active:scale-95 border-border/60 ${isGcfPaused ? 'hover:bg-emerald-500/10 hover:text-emerald-400 hover:border-emerald-500/20' : 'hover:bg-amber-500/10 hover:text-amber-400 hover:border-amber-500/20'}`}
+                      >
+                        {isGcfPaused ? (
+                          <>
+                            <Play size={10} className="fill-current mr-1.5" />
+                            <span>Resume</span>
+                          </>
+                        ) : (
+                          <>
+                            <Pause size={10} className="fill-current mr-1.5" />
+                            <span>Pause</span>
+                          </>
+                        )}
+                      </Button>
+                      <Button 
+                        onClick={() => setShowGcfSettings(!showGcfSettings)}
+                        variant={showGcfSettings ? "secondary" : "outline"}
+                        className="text-xs px-3 py-1.5 h-8 font-semibold transition-all active:scale-95 border-border/60"
+                      >
+                        <Settings size={11} className="mr-1.5" />
+                        <span>{showGcfSettings ? 'Close' : 'Configure'}</span>
+                      </Button>
+                    </div>
                   </div>
+
+                  {/* Active Endpoint Info */}
+                  <div className="text-[11px] font-mono text-indigo-400/80 bg-indigo-500/5 border border-indigo-500/10 rounded-lg p-2 flex items-center justify-between">
+                    <span className="truncate">URL: https://us-central1-aragosalooker.cloudfunctions.net/cohort-analyzer</span>
+                    <a 
+                      href="https://us-central1-aragosalooker.cloudfunctions.net/cohort-analyzer" 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="ml-2 hover:text-indigo-300 transition-colors"
+                    >
+                      <ExternalLink size={10} />
+                    </a>
+                  </div>
+
+                  {/* Display Pipeline Settings */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs bg-muted/20 border border-border/20 rounded-xl p-3">
+                    <div>
+                      <span className="text-[10px] text-muted-foreground block uppercase font-mono">Schedule</span>
+                      <span className="font-semibold text-foreground truncate block">{gcfSchedule}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-muted-foreground block uppercase font-mono">Segment</span>
+                      <span className="font-semibold text-foreground truncate block">{gcfTargetSegment}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-muted-foreground block uppercase font-mono">Alert Email</span>
+                      <span className="font-semibold text-foreground truncate block" title={gcfAlertEmail}>{gcfAlertEmail}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-muted-foreground block uppercase font-mono">Threshold</span>
+                      <span className="font-semibold text-foreground truncate block">{gcfThreshold}</span>
+                    </div>
+                  </div>
+
+                  {/* Expandable Settings Form */}
+                  {showGcfSettings && (
+                    <div className="border border-border/30 bg-muted/10 rounded-xl p-4 space-y-4 animate-in slide-in-from-top-2 duration-300">
+                      <h5 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                        <Sliders size={12} className="text-indigo-400" />
+                        <span>Pipeline Configuration</span>
+                      </h5>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-medium text-muted-foreground">Trigger Schedule (Cron)</label>
+                          <input 
+                            type="text" 
+                            value={gcfSchedule} 
+                            onChange={(e) => setGcfSchedule(e.target.value)}
+                            className="w-full bg-background/50 border border-border/60 text-xs text-foreground rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-500/80 transition-colors"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-medium text-muted-foreground">Target User Segment</label>
+                          <select 
+                            value={gcfTargetSegment} 
+                            onChange={(e) => setGcfTargetSegment(e.target.value)}
+                            className="w-full bg-background/50 border border-border/60 text-xs text-foreground rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-500/80 transition-colors"
+                          >
+                            <option value="All Active Players">All Active Players</option>
+                            <option value="Paying Users (IAP)">Paying Users (IAP)</option>
+                            <option value="New Players (D1-D7)">New Players (D1-D7)</option>
+                            <option value="Churn Risks">Churn Risks</option>
+                          </select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-medium text-muted-foreground">Notification Email</label>
+                          <input 
+                            type="email" 
+                            value={gcfAlertEmail} 
+                            onChange={(e) => setGcfAlertEmail(e.target.value)}
+                            className="w-full bg-background/50 border border-border/60 text-xs text-foreground rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-500/80 transition-colors"
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-medium text-muted-foreground">Correlation Threshold</label>
+                          <input 
+                            type="text" 
+                            value={gcfThreshold} 
+                            onChange={(e) => setGcfThreshold(e.target.value)}
+                            className="w-full bg-background/50 border border-border/60 text-xs text-foreground rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-500/80 transition-colors"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2 pt-2 border-t border-border/10">
+                        <Button 
+                          onClick={() => setShowGcfSettings(false)}
+                          variant="ghost" 
+                          className="text-xs px-3.5 h-8 font-semibold hover:bg-muted active:scale-95"
+                        >
+                          Cancel
+                        </Button>
+                        <Button 
+                          onClick={() => {
+                            runWorkflow('deploy_gcf', 'update_settings');
+                            setShowGcfSettings(false);
+                          }}
+                          className="bg-indigo-600 hover:bg-indigo-500 text-xs px-3.5 h-8 font-semibold text-white transition-all active:scale-95"
+                        >
+                          Apply Configuration
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </CardContent>
@@ -874,7 +1028,12 @@ const AiSummaryDashboard = () => {
                 <h3 className="font-semibold text-foreground">
                   {activeWorkflow === 'kpi_monitor' && 'D1 Retention Monitor'}
                   {activeWorkflow === 'ad_optimizer' && 'Ad Bidding Optimizer'}
-                  {activeWorkflow === 'deploy_gcf' && 'Cloud Function Provisioner'}
+                  {activeWorkflow === 'deploy_gcf' && (
+                    gcfAction === 'pause' ? 'Pausing Cloud Function Pipeline' :
+                    gcfAction === 'resume' ? 'Resuming Cloud Function Pipeline' :
+                    gcfAction === 'update_settings' ? 'Updating Pipeline Configuration' :
+                    'Cloud Function Provisioner'
+                  )}
                 </h3>
               </div>
               <Button 
