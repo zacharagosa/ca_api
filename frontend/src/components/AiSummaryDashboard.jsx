@@ -68,7 +68,7 @@ const AiSummaryDashboard = () => {
   const [isGcfPaused, setIsGcfPaused] = useState(false);
   const [gcfSchedule, setGcfSchedule] = useState('0 8 * * *');
   const [gcfTargetSegment, setGcfTargetSegment] = useState('All Active Players');
-  const [gcfAlertEmail, setGcfAlertEmail] = useState('portfolio-leads@altostrat.com');
+  const [gcfAlertEmail, setGcfAlertEmail] = useState('');
   const [gcfThreshold, setGcfThreshold] = useState('10%');
   const [showGcfSettings, setShowGcfSettings] = useState(false);
   const [gcfAction, setGcfAction] = useState(null);
@@ -872,13 +872,14 @@ const AiSummaryDashboard = () => {
 
                   {/* Active Endpoint Info */}
                   <div className="text-[11px] font-mono text-indigo-400/80 bg-indigo-500/5 border border-indigo-500/10 rounded-lg p-2 flex items-center justify-between">
-                    <span className="truncate">URL: https://us-central1-aragosalooker.cloudfunctions.net/cohort-analyzer</span>
+                    <span className="truncate">URL: /api/cohort-analyzer</span>
                     <a 
-                      href="https://us-central1-aragosalooker.cloudfunctions.net/cohort-analyzer" 
+                      href={`/api/cohort-analyzer?schedule=${encodeURIComponent(gcfSchedule)}&target=${encodeURIComponent(gcfTargetSegment)}&webhook=${encodeURIComponent(gcfAlertEmail)}&threshold=${encodeURIComponent(gcfThreshold)}`}
                       target="_blank" 
                       rel="noopener noreferrer"
-                      className="ml-2 hover:text-indigo-300 transition-colors"
+                      className="ml-2 hover:text-indigo-300 transition-colors flex items-center gap-1 text-[10px] text-indigo-400 border border-indigo-500/25 px-2 py-0.5 rounded bg-indigo-500/10 font-sans font-semibold active:scale-95 transition-all"
                     >
+                      <span>Trigger Pipeline</span>
                       <ExternalLink size={10} />
                     </a>
                   </div>
@@ -894,8 +895,8 @@ const AiSummaryDashboard = () => {
                       <span className="font-semibold text-foreground truncate block">{gcfTargetSegment}</span>
                     </div>
                     <div>
-                      <span className="text-[10px] text-muted-foreground block uppercase font-mono">Alert Email</span>
-                      <span className="font-semibold text-foreground truncate block" title={gcfAlertEmail}>{gcfAlertEmail}</span>
+                      <span className="text-[10px] text-muted-foreground block uppercase font-mono">Chat Webhook</span>
+                      <span className="font-semibold text-foreground truncate block text-indigo-400" title={gcfAlertEmail || 'System Default'}>{gcfAlertEmail ? 'Configured' : 'System Default'}</span>
                     </div>
                     <div>
                       <span className="text-[10px] text-muted-foreground block uppercase font-mono">Threshold</span>
@@ -934,10 +935,11 @@ const AiSummaryDashboard = () => {
                           </select>
                         </div>
                         <div className="space-y-1.5">
-                          <label className="text-[10px] font-medium text-muted-foreground">Notification Email</label>
+                          <label className="text-[10px] font-medium text-muted-foreground">Chat Webhook URL (Google Chat / Slack)</label>
                           <input 
-                            type="email" 
+                            type="text" 
                             value={gcfAlertEmail} 
+                            placeholder="https://chat.googleapis.com/v1/spaces/..."
                             onChange={(e) => setGcfAlertEmail(e.target.value)}
                             className="w-full bg-background/50 border border-border/60 text-xs text-foreground rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-500/80 transition-colors"
                           />
