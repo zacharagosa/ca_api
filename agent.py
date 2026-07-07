@@ -110,6 +110,7 @@ AGENT_CONFIG = load_agent_config()
 load_dotenv()
 import threading
 # from google.cloud import geminidataanalytics
+from google.api_core import client_options as client_options_lib
 
 from google.adk.agents import Agent
 from google.adk.tools import agent_tool
@@ -206,6 +207,30 @@ PROJECT_ID = os.getenv("PROJECT_ID", "1094200614711")
 if PROJECT_ID == "aragosalooker":
     PROJECT_ID = "1094200614711" # Force numeric ID if default/old string is found
 LOCATION = os.getenv("LOCATION", "global")
+
+# GA API: Regional endpoint support for data residency compliance
+CA_API_LOCATION = os.getenv("CA_API_LOCATION", "global")
+
+def _build_ca_api_endpoint(location: str) -> str:
+    """Builds the correct CA API endpoint URL based on location.
+    
+    Supports:
+    - 'global' -> geminidataanalytics.googleapis.com
+    - Regional (e.g. 'us-east4') -> geminidataanalytics-{location}.googleapis.com
+    - Multi-regional (e.g. 'eu', 'us') -> geminidataanalytics.{location}.rep.googleapis.com
+    """
+    if location == "global" or not location:
+        return "geminidataanalytics.googleapis.com"
+    elif location in ("eu", "us"):
+        # Multi-regional endpoints
+        return f"geminidataanalytics.{location}.rep.googleapis.com"
+    else:
+        # Regional endpoints (e.g. us-east4, europe-west1)
+        return f"geminidataanalytics-{location}.googleapis.com"
+
+CA_API_ENDPOINT = _build_ca_api_endpoint(CA_API_LOCATION)
+print(f"INFO: CA API endpoint: {CA_API_ENDPOINT} (location: {CA_API_LOCATION})")
+
 try:
     vertexai.init(
         project=PROJECT_ID,
@@ -248,19 +273,222 @@ def get_access_token():
 
 # Global client and cached objects to avoid re-init overhead
 global_data_chat_client = None
+_cached_agent_service_client = None
 _cached_credentials = None
 _cached_datasource_refs = None
+_cached_context_authoring = None  # Cached glossary terms + example queries
+
+def _get_ca_client_options():
+    """Returns client_options configured for the correct CA API endpoint."""
+    return client_options_lib.ClientOptions(api_endpoint=CA_API_ENDPOINT)
 
 def _get_cached_client():
     """Returns cached DataChatServiceClient, creating if needed."""
     global global_data_chat_client
     from google.cloud import geminidataanalytics
     if global_data_chat_client is None:
-        log_debug("Initializing Global DataChatServiceClient...")
+        log_debug(f"Initializing DataChatServiceClient (endpoint: {CA_API_ENDPOINT})...")
         global_data_chat_client = geminidataanalytics.DataChatServiceClient(
-            credentials=auth_manager.get_credentials()
+            credentials=auth_manager.get_credentials(),
+            client_options=_get_ca_client_options()
         )
     return global_data_chat_client
+
+def _get_agent_service_client():
+    """Returns cached DataAgentServiceClient for managed agent CRUD operations."""
+    global _cached_agent_service_client
+    from google.cloud import geminidataanalytics
+    if _cached_agent_service_client is None:
+        log_debug(f"Initializing DataAgentServiceClient (endpoint: {CA_API_ENDPOINT})...")
+        _cached_agent_service_client = geminidataanalytics.DataAgentServiceClient(
+            credentials=auth_manager.get_credentials(),
+            client_options=_get_ca_client_options()
+        )
+    return _cached_agent_service_client
+
+
+# --- Context Authoring: Glossary Terms & Example Queries (GA Feature) ---
+
+def _load_context_authoring():
+    """Loads glossary terms and example queries from the dataset config.
+    
+    GA API Feature: Context authoring gives the API's model domain-specific
+    grounding context natively — more effective than system instruction hacks.
+    """
+    global _cached_context_authoring
+    from google.cloud import geminidataanalytics
+    
+    if _cached_context_authoring is not None:
+        return _cached_context_authoring
+    
+    dataset_name = os.getenv("DATASET_NAME", "events")
+    dataset_path = f"datasets/{dataset_name}.yaml"
+    
+    glossary_terms = []
+    example_queries = []
+    
+    try:
+        with open(dataset_path, 'r') as f:
+            dataset_config = yaml.safe_load(f) or {}
+        
+        # Load glossary terms
+        raw_glossary = dataset_config.get('glossary', [])
+        for item in raw_glossary:
+            if isinstance(item, dict) and 'term' in item:
+                gt = geminidataanalytics.GlossaryTerm(
+                    display_name=item['term'],
+                    description=item.get('definition', '')
+                )
+                glossary_terms.append(gt)
+        
+        if glossary_terms:
+            print(f"INFO: Loaded {len(glossary_terms)} glossary terms for context authoring")
+        
+        # Load verified/example questions
+        raw_examples = dataset_config.get('verified_questions', [])
+        for item in raw_examples:
+            if isinstance(item, dict) and 'question' in item:
+                eq = geminidataanalytics.ExampleQuery(
+                    natural_language_question=item['question'],
+                    sql_query=item.get('sql', '')
+                )
+                example_queries.append(eq)
+        
+        if example_queries:
+            print(f"INFO: Loaded {len(example_queries)} verified questions for context authoring")
+    
+    except Exception as e:
+        print(f"WARNING: Could not load context authoring from {dataset_path}: {e}")
+    
+    _cached_context_authoring = {
+        'glossary_terms': glossary_terms,
+        'example_queries': example_queries if example_queries else None
+    }
+    return _cached_context_authoring
+
+
+# --- Managed Agent CRUD (GA Feature: DataAgentServiceClient) ---
+
+def create_data_agent(display_name: str, description: str = ""):
+    """Creates a new managed data agent synchronously."""
+    from google.cloud import geminidataanalytics
+    client = _get_agent_service_client()
+    
+    agent = geminidataanalytics.DataAgent(
+        display_name=display_name,
+        description=description,
+    )
+    
+    request = geminidataanalytics.CreateDataAgentRequest(
+        parent=f"projects/{PROJECT_ID}/locations/{CA_API_LOCATION}",
+        data_agent=agent,
+    )
+    
+    operation = client.create_data_agent(request=request)
+    result = operation.result()  # Synchronous wait
+    log_debug(f"Created data agent: {result.name}")
+    return result
+
+def list_data_agents():
+    """Lists all data agents in the project."""
+    client = _get_agent_service_client()
+    from google.cloud import geminidataanalytics
+    
+    request = geminidataanalytics.ListDataAgentsRequest(
+        parent=f"projects/{PROJECT_ID}/locations/{CA_API_LOCATION}",
+    )
+    
+    agents = []
+    for agent in client.list_data_agents(request=request):
+        agents.append({
+            'name': agent.name,
+            'display_name': agent.display_name,
+            'description': agent.description,
+            'create_time': agent.create_time.isoformat() if agent.create_time else None,
+            'update_time': agent.update_time.isoformat() if agent.update_time else None,
+        })
+    return agents
+
+def list_accessible_data_agents():
+    """Lists all data agents accessible to the current user (including shared agents)."""
+    client = _get_agent_service_client()
+    from google.cloud import geminidataanalytics
+    
+    request = geminidataanalytics.ListAccessibleDataAgentsRequest(
+        parent=f"projects/{PROJECT_ID}/locations/{CA_API_LOCATION}",
+    )
+    
+    agents = []
+    for agent in client.list_accessible_data_agents(request=request):
+        agents.append({
+            'name': agent.name,
+            'display_name': agent.display_name,
+            'description': agent.description,
+            'create_time': agent.create_time.isoformat() if agent.create_time else None,
+        })
+    return agents
+
+def get_data_agent(agent_id: str):
+    """Gets details of a specific data agent."""
+    client = _get_agent_service_client()
+    from google.cloud import geminidataanalytics
+    
+    agent_name = agent_id if '/' in agent_id else f"projects/{PROJECT_ID}/locations/{CA_API_LOCATION}/dataAgents/{agent_id}"
+    request = geminidataanalytics.GetDataAgentRequest(name=agent_name)
+    
+    agent = client.get_data_agent(request=request)
+    return {
+        'name': agent.name,
+        'display_name': agent.display_name,
+        'description': agent.description,
+        'create_time': agent.create_time.isoformat() if agent.create_time else None,
+        'update_time': agent.update_time.isoformat() if agent.update_time else None,
+    }
+
+def delete_data_agent(agent_id: str):
+    """Deletes a data agent."""
+    client = _get_agent_service_client()
+    from google.cloud import geminidataanalytics
+    
+    agent_name = agent_id if '/' in agent_id else f"projects/{PROJECT_ID}/locations/{CA_API_LOCATION}/dataAgents/{agent_id}"
+    request = geminidataanalytics.DeleteDataAgentRequest(name=agent_name)
+    
+    client.delete_data_agent(request=request)
+    log_debug(f"Deleted data agent: {agent_name}")
+    return True
+
+
+# --- Server-Side Conversation Management (GA Feature) ---
+
+def delete_ca_conversation(conversation_id: str):
+    """Deletes a conversation from the CA API server-side."""
+    from google.cloud import geminidataanalytics
+    client = _get_cached_client()
+    
+    conv_name = conversation_id if '/' in conversation_id else f"projects/{PROJECT_ID}/locations/{CA_API_LOCATION}/conversations/{conversation_id}"
+    request = geminidataanalytics.DeleteConversationRequest(name=conv_name)
+    
+    client.delete_conversation(request=request)
+    log_debug(f"Deleted CA conversation: {conv_name}")
+    return True
+
+def list_ca_conversations():
+    """Lists conversations from the CA API."""
+    from google.cloud import geminidataanalytics
+    client = _get_cached_client()
+    
+    request = geminidataanalytics.ListConversationsRequest(
+        parent=f"projects/{PROJECT_ID}/locations/{CA_API_LOCATION}",
+    )
+    
+    conversations = []
+    for conv in client.list_conversations(request=request):
+        conversations.append({
+            'name': conv.name,
+            'create_time': conv.create_time.isoformat() if conv.create_time else None,
+            'last_used_time': conv.last_used_time.isoformat() if conv.last_used_time else None,
+        })
+    return conversations
 
 def _get_cached_datasource():
     """Returns cached datasource references, creating if needed."""
@@ -312,15 +540,28 @@ def fast_query(question: str, history: list = []):
          print("WARNING: Fast mode instruction missing, using fallback.")
          system_instruction = "Answer directly with data. Be concise."
     
-    inline_context = geminidataanalytics.Context(
-        system_instruction=system_instruction,
-        datasource_references=datasource_refs,
-        options=geminidataanalytics.ConversationOptions(
+    # GA Feature: Load context authoring (glossary terms + example queries)
+    context_authoring = _load_context_authoring()
+    
+    context_kwargs = {
+        'system_instruction': system_instruction,
+        'datasource_references': datasource_refs,
+        'options': geminidataanalytics.ConversationOptions(
             analysis=geminidataanalytics.AnalysisOptions(
                 python=geminidataanalytics.AnalysisOptions.Python(enabled=False)
             )
         ),
-    )
+    }
+    
+    # Add glossary terms if available
+    if context_authoring.get('glossary_terms'):
+        context_kwargs['glossary_terms'] = context_authoring['glossary_terms']
+    
+    # Add example queries if available
+    if context_authoring.get('example_queries'):
+        context_kwargs['example_queries'] = context_authoring['example_queries']
+    
+    inline_context = geminidataanalytics.Context(**context_kwargs)
     
     messages = []
     
@@ -426,9 +667,16 @@ def fast_query(question: str, history: list = []):
                     message_dict = geminidataanalytics.SystemMessage.to_dict(item.system_message)
                     
                     if "text" in message_dict:
-                        # API v2: text now has 'text_type' field (1=final answer, 2=thinking/reasoning)
+                        # GA API: Use proper TextMessage.TextType enum instead of hardcoded ints
+                        # FINAL_RESPONSE=1, THOUGHT=2 (step-by-step reasoning), PROGRESS=3
                         text_data = message_dict["text"]
-                        text_type = text_data.get("text_type", 1) if isinstance(text_data, dict) else 1
+                        text_type_raw = text_data.get("text_type", 0) if isinstance(text_data, dict) else 0
+                        
+                        # Map raw int to enum for clarity
+                        try:
+                            text_type = geminidataanalytics.TextMessage.TextType(text_type_raw)
+                        except ValueError:
+                            text_type = geminidataanalytics.TextMessage.TextType.TEXT_TYPE_UNSPECIFIED
                         
                         if isinstance(text_data, dict) and "parts" in text_data:
                             text_content = " ".join(text_data["parts"])
@@ -437,10 +685,14 @@ def fast_query(question: str, history: list = []):
                         else:
                             text_content = str(text_data)
                         
-                        # text_type 2 = thinking/reasoning, text_type 1 = final answer
-                        if text_type == 2:
+                        # Route based on TextType enum
+                        if text_type == geminidataanalytics.TextMessage.TextType.THOUGHT:
+                            yield {"type": "thought", "content": text_content}
+                        elif text_type == geminidataanalytics.TextMessage.TextType.PROGRESS:
+                            # PROGRESS = step-by-step reasoning updates (GA feature: Streaming Thoughts)
                             yield {"type": "thought", "content": text_content}
                         else:
+                            # FINAL_RESPONSE or TEXT_TYPE_UNSPECIFIED → treat as final answer
                             yield {"type": "text", "content": text_content}
                     
                     elif "schema" in message_dict:
@@ -492,7 +744,7 @@ def fast_query(question: str, history: list = []):
                     elif "chart" in message_dict:
                         chart = message_dict["chart"]
                         
-                        # API v2: Chart also streams in TWO chunks:
+                        # GA API: Chart streams in TWO chunks:
                         # Chunk 1: {"chart": {"query": {...}}} - chart request
                         # Chunk 2: {"chart": {"result": {"vega_config": {...}}}} - chart config
                         
@@ -504,6 +756,36 @@ def fast_query(question: str, history: list = []):
                         # Only yield when we have the result with vega_config
                         if "result" in chart:
                             yield {"type": "chart", "content": chart["result"]}
+                    
+                    elif "error" in message_dict:
+                        # GA Feature: Disambiguation handling
+                        # When the model is unsure about user intent, it returns
+                        # clarifying questions/options in the error message
+                        error_data = message_dict["error"]
+                        error_msg = ""
+                        if isinstance(error_data, dict):
+                            error_msg = error_data.get("message", str(error_data))
+                            # Check if this is a disambiguation response
+                            suggestions = error_data.get("suggestions", [])
+                            if suggestions:
+                                yield {
+                                    "type": "disambiguation",
+                                    "content": {
+                                        "message": error_msg,
+                                        "options": suggestions
+                                    }
+                                }
+                                continue
+                        else:
+                            error_msg = str(error_data)
+                        
+                        log_debug(f"Received error message: {error_msg}")
+                        yield {"type": "error", "content": error_msg}
+                    
+                    elif "example_queries" in message_dict:
+                        # GA Feature: The API may suggest example queries
+                        log_debug(f"Received example queries suggestion from API")
+                        continue
             
             yield {"type": "done", "content": None}
             break # Success, exit retry loop
@@ -810,52 +1092,39 @@ def get_insights(question: str):
         the output easier for an LLM to understand and process.
     """
  
-    global global_data_chat_client
-    if global_data_chat_client is None:
-        log_debug("Initializing Global DataChatServiceClient...")
-        from google.cloud import geminidataanalytics
-        global_data_chat_client = geminidataanalytics.DataChatServiceClient(
-            credentials=auth_manager.get_credentials()
-        )
-    data_chat_client = global_data_chat_client
-
-    # Always use service account Looker credentials as we are using Google Sign-In for app auth
-    log_debug("Using service account Looker credentials.")
     from google.cloud import geminidataanalytics
-    credentials = geminidataanalytics.Credentials(
-        oauth=geminidataanalytics.OAuthCredentials(
-            secret=geminidataanalytics.OAuthCredentials.SecretBased(
-                client_id=LOOKER_CLIENT_ID, client_secret=LOOKER_CLIENT_SECRET
-            ),
-        )
-    )
+    data_chat_client = _get_cached_client()
 
-    looker_explore_reference = geminidataanalytics.LookerExploreReference(
-        looker_instance_uri=LOOKER_INSTANCE_URI, lookml_model=LOOKML_MODEL, explore=EXPLORE
-    )
-
-    # Connect to your Looker datasource
-    datasource_references = geminidataanalytics.DatasourceReferences(
-        looker=geminidataanalytics.LookerExploreReferences(
-            explore_references=[looker_explore_reference],
-            credentials=credentials 
-        ),
-    )
+    # Use cached datasource references
+    datasource_references = _get_cached_datasource()
 
     system_instruction = AGENT_CONFIG.get('get_insights', {}).get('system_instruction', """You are a specialized AI data analyst...""")
 
-    # Context set-up for 'Chat using Inline Context'
-    inline_context = geminidataanalytics.Context(
-        system_instruction=system_instruction,
-        datasource_references=datasource_references,
-        options=geminidataanalytics.ConversationOptions(
+    # GA Feature: Load context authoring (glossary terms + example queries)
+    context_authoring = _load_context_authoring()
+    
+    context_kwargs = {
+        'system_instruction': system_instruction,
+        'datasource_references': datasource_references,
+        'options': geminidataanalytics.ConversationOptions(
             analysis=geminidataanalytics.AnalysisOptions(
                 python=geminidataanalytics.AnalysisOptions.Python(
                     enabled=False
                 )
             )
         ),
-    )
+    }
+    
+    # Add glossary terms if available
+    if context_authoring.get('glossary_terms'):
+        context_kwargs['glossary_terms'] = context_authoring['glossary_terms']
+    
+    # Add example queries if available
+    if context_authoring.get('example_queries'):
+        context_kwargs['example_queries'] = context_authoring['example_queries']
+    
+    # Context set-up for 'Chat using Inline Context'
+    inline_context = geminidataanalytics.Context(**context_kwargs)
 
     messages = [geminidataanalytics.Message()]
     messages[0].user_message.text = question

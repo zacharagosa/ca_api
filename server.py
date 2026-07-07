@@ -436,6 +436,9 @@ def fast_query():
                      saved_chart_config = content  # Track for saving
                      yield f"DATA: {json.dumps({'type': 'json_chart', 'config': content})}\n"
                         
+                elif chunk_type == "disambiguation":
+                    # GA Feature: API returns clarifying questions when intent is ambiguous
+                    yield f"DATA: {json.dumps({'type': 'disambiguation', 'data': content})}\n"
                 elif chunk_type == "error":
                     yield f"DATA: Error: {content}\n"
                 elif chunk_type == "done":
@@ -507,6 +510,87 @@ def delete_history(session_id):
     """Deletes a conversation."""
     conversation_manager.delete_conversation(session_id)
     return jsonify({'status': 'success'})
+
+
+# --- GA Feature: Server-Side Conversation Management via CA API ---
+
+@app.route('/api/ca-conversations', methods=['GET'])
+def list_ca_conversations():
+    """Lists conversations managed by the Conversational Analytics API."""
+    try:
+        conversations = agent.list_ca_conversations()
+        return jsonify(conversations)
+    except Exception as e:
+        print(f"CA Conversations List Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ca-conversation/<path:conversation_id>', methods=['DELETE'])
+def delete_ca_conversation(conversation_id):
+    """Deletes a conversation from the CA API server-side."""
+    try:
+        agent.delete_ca_conversation(conversation_id)
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        print(f"CA Conversation Delete Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# --- GA Feature: Managed Agent CRUD via DataAgentServiceClient ---
+
+@app.route('/api/agents', methods=['GET'])
+def list_agents():
+    """Lists all data agents, including accessible/shared agents."""
+    try:
+        include_accessible = request.args.get('accessible', 'false').lower() == 'true'
+        if include_accessible:
+            agents = agent.list_accessible_data_agents()
+        else:
+            agents = agent.list_data_agents()
+        return jsonify(agents)
+    except Exception as e:
+        print(f"Agent List Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/agents', methods=['POST'])
+def create_agent():
+    """Creates a new managed data agent."""
+    try:
+        data = request.json
+        display_name = data.get('display_name')
+        description = data.get('description', '')
+        
+        if not display_name:
+            return jsonify({'error': 'display_name is required'}), 400
+        
+        result = agent.create_data_agent(display_name, description)
+        return jsonify({
+            'name': result.name,
+            'display_name': result.display_name,
+            'description': result.description,
+        }), 201
+    except Exception as e:
+        print(f"Agent Create Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/agents/<path:agent_id>', methods=['GET'])
+def get_agent(agent_id):
+    """Gets details of a specific data agent."""
+    try:
+        result = agent.get_data_agent(agent_id)
+        return jsonify(result)
+    except Exception as e:
+        print(f"Agent Get Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/agents/<path:agent_id>', methods=['DELETE'])
+def delete_agent(agent_id):
+    """Deletes a data agent."""
+    try:
+        agent.delete_data_agent(agent_id)
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        print(f"Agent Delete Error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/dataset-config', methods=['GET'])
 def get_dataset_config():

@@ -7,5 +7,11 @@
 			"path": "../ghost_story"
 		}
 	],
-	"settings": {}
+	"settings": {
+		"looker.instanceURL": "https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app",
+		"looker.clientId": "9cR2K4JdGYjZCBCm6HGs",
+		"looker.clientSecret": "8YP9CWFVhdzxF2dvPsyJhQdR",
+		"looker.projectId": "gaming",
+		"looker.skillsInstallPath": ".agents/skills"
+	}
 }

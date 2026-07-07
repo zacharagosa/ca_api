@@ -1,7 +1,8 @@
 google-cloud-aiplatform[adk,agent_engines]
-google-cloud-geminidataanalytics
+google-cloud-geminidataanalytics>=0.6.0
 google-auth
 google-adk>=1.27.4
+google-api-core
 flask
 flask-cors
 requests

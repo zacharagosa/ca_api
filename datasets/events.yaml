@@ -99,6 +99,42 @@ spanner:
   database_id: gaming-graph
 
 
+# GA Feature: Context Authoring — Glossary Terms
+# Business-specific terminology that helps the API understand domain context
+glossary:
+  - term: "DAU"
+    definition: "Daily Active Users — count of unique users who triggered at least one event on a given day. Use events.number_of_users."
+  - term: "D1 Retention"
+    definition: "Day 1 Retention Rate — the percentage of new users who return on the day after their first session. Use events.d1_retention_rate."
+  - term: "IAP Revenue"
+    definition: "In-App Purchase Revenue — revenue generated from players purchasing items or upgrades inside the game. Use events.total_iap_revenue."
+  - term: "Ad Revenue"
+    definition: "Advertising Revenue — revenue generated from ad impressions shown to players. Use events.total_ad_revenue."
+  - term: "Total Revenue"
+    definition: "The sum of IAP revenue and ad revenue. Use events.total_revenue."
+  - term: "Session"
+    definition: "A continuous period of user activity in the game, from session_start to session_end. Use events.session_count for counting sessions."
+  - term: "ARPU"
+    definition: "Average Revenue Per User — total revenue divided by number of active users."
+  - term: "Lookup Battle Royale"
+    definition: "One of two games in the portfolio. High-volume title with IAP-driven monetization model."
+  - term: "Lookerwood Farm"
+    definition: "One of two games in the portfolio. Medium-volume title with ad-driven monetization model."
+
+# GA Feature: Context Authoring — Verified Questions (Example Queries)
+# Pre-validated question→intent pairs that help the API generate more accurate queries
+verified_questions:
+  - question: "What was yesterday's total revenue?"
+    sql: "SELECT events.total_revenue FROM events WHERE events.event_date = 'yesterday'"
+  - question: "How many active users did we have last week?"
+    sql: "SELECT events.number_of_users FROM events WHERE events.event_date = 'last week'"
+  - question: "What is the Day 1 retention rate for the past month?"
+    sql: "SELECT events.event_date, events.d1_retention_rate FROM events WHERE events.event_date = 'last month'"
+  - question: "Show revenue by game name for the last 7 days"
+    sql: "SELECT events.game_name, events.event_date, events.total_revenue FROM events WHERE events.event_date = 'last 7 days'"
+  - question: "What was the total ad revenue from players in Germany?"
+    sql: "SELECT events.total_ad_revenue FROM events WHERE events.country = 'Germany'"
+
 # Starter questions shown to users in the chat interface
 starter_questions:
   - "User Overview: How many active users did we have in the last 7 days?"
