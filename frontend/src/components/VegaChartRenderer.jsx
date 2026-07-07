@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { VegaEmbed } from 'react-vega';
+import { useMemo, useEffect, useRef } from 'react';
+import vegaEmbed from 'vega-embed';
 
 /**
  * VegaChartRenderer - Renders Vega-Lite specs from API v2 fast mode responses.
@@ -8,6 +8,8 @@ import { VegaEmbed } from 'react-vega';
  * This component wraps it with proper sizing and light theme defaults.
  */
 const VegaChartRenderer = ({ vegaConfig, data, width = 'container', height = 250 }) => {
+    const containerRef = useRef(null);
+
     // Build the complete Vega-Lite spec with defaults
     const spec = useMemo(() => {
         try {
@@ -63,17 +65,39 @@ const VegaChartRenderer = ({ vegaConfig, data, width = 'container', height = 250
         }
     }, [vegaConfig, data, width, height]);
 
+    useEffect(() => {
+        if (!containerRef.current || !spec) return;
+
+        let viewPromise = null;
+        try {
+            viewPromise = vegaEmbed(containerRef.current, spec, {
+                actions: false,
+                renderer: 'svg',
+                width: 'container'
+            });
+        } catch (err) {
+            console.error("Vega embedding error:", err);
+        }
+
+        return () => {
+            if (viewPromise) {
+                viewPromise.then(res => {
+                    if (res && typeof res.finalize === 'function') {
+                        res.finalize();
+                    }
+                }).catch(() => {});
+            }
+        };
+    }, [spec]);
+
     if (!spec) return null;
 
     return (
-        <div className="w-full min-h-[250px] min-w-[300px]" style={{ width: '100%', minHeight: '250px' }}>
-            <VegaEmbed
-                spec={spec}
-                actions={false}
-                renderer="svg"
-                width="container"
-            />
-        </div>
+        <div 
+            ref={containerRef}
+            className="w-full min-h-[250px] min-w-[300px]" 
+            style={{ width: '100%', minHeight: '250px' }} 
+        />
     );
 };
 
