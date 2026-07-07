@@ -46,8 +46,12 @@ const VegaChartRenderer = ({ vegaConfig, data, width = 'container', height = 250
                 }
             };
 
-            // Safely inject data without overwriting the entire data object if it already has a "name" property
-            if (data && data.rows && data.rows.length > 0) {
+            // Safely inject data only if the spec does not already embed data under datasets or values
+            const hasEmbeddedData = (actualConfig.datasets && Object.keys(actualConfig.datasets).length > 0) || 
+                                     (actualConfig.data && Array.isArray(actualConfig.data.values)) ||
+                                     (actualConfig.data && actualConfig.data.values);
+
+            if (!hasEmbeddedData && data && data.rows && data.rows.length > 0) {
                 // Overwrite data entirely to drop the "name" attribute, forcing Vega-Lite to process it as inline data
                 finalSpec.data = { values: data.rows };
             }

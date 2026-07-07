@@ -41,7 +41,7 @@ def test_question(question: str):
                     print(f"  Sample Row: {content['rows'][0]}")
             elif chunk_type == "chart":
                 print("[CHART]: Vega Config received:")
-                print(json.dumps(content, indent=2)[:300] + "...")
+                print(json.dumps(content, indent=2))
             elif chunk_type == "disambiguation":
                 print("[DISAMBIGUATION]: Suggestions received:")
                 print(json.dumps(content, indent=2))
