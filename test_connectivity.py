@@ -39,11 +39,19 @@ def test_connectivity():
         looker_instance_uri=LOOKER_INSTANCE_URI, lookml_model=LOOKML_MODEL, explore=EXPLORE
     )
 
-    datasource_references = geminidataanalytics.DatasourceReferences(
-        looker=geminidataanalytics.LookerExploreReferences(
+    has_looker_credentials = 'credentials' in geminidataanalytics.LookerExploreReferences.pb().DESCRIPTOR.fields_by_name
+    if has_looker_credentials:
+        looker_refs = geminidataanalytics.LookerExploreReferences(
             explore_references=[looker_explore_reference],
             credentials=credentials
-        ),
+        )
+    else:
+        looker_refs = geminidataanalytics.LookerExploreReferences(
+            explore_references=[looker_explore_reference]
+        )
+        
+    datasource_references = geminidataanalytics.DatasourceReferences(
+        looker=looker_refs,
     )
     
     inline_context = geminidataanalytics.Context(
@@ -54,11 +62,15 @@ def test_connectivity():
         messages = [geminidataanalytics.Message()]
         messages[0].user_message.text = "Hello"
         
-        request = geminidataanalytics.ChatRequest(
-            inline_context=inline_context,
-            parent=f"projects/{PROJECT_ID}/locations/{LOCATION}",
-            messages=messages,
-        )
+        chat_kwargs = {
+            'inline_context': inline_context,
+            'parent': f"projects/{PROJECT_ID}/locations/{LOCATION}",
+            'messages': messages,
+        }
+        if 'credentials' in geminidataanalytics.ChatRequest.pb().DESCRIPTOR.fields_by_name:
+            chat_kwargs['credentials'] = credentials
+            
+        request = geminidataanalytics.ChatRequest(**chat_kwargs)
         print("Sending Valid ChatRequest...")
         response = client.chat(request=request)
         print("Success! Response received.")

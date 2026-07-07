@@ -507,15 +507,41 @@ def _get_cached_datasource():
         looker_explore_reference = geminidataanalytics.LookerExploreReference(
             looker_instance_uri=LOOKER_INSTANCE_URI, lookml_model=LOOKML_MODEL, explore=EXPLORE
         )
+
+        # Check if LookerExploreReferences accepts credentials (older SDK versions)
+        has_looker_credentials = 'credentials' in geminidataanalytics.LookerExploreReferences.pb().DESCRIPTOR.fields_by_name
         
-        _cached_datasource_refs = geminidataanalytics.DatasourceReferences(
-            looker=geminidataanalytics.LookerExploreReferences(
+        if has_looker_credentials:
+            looker_refs = geminidataanalytics.LookerExploreReferences(
                 explore_references=[looker_explore_reference],
                 credentials=_cached_credentials
-            ),
+            )
+        else:
+            looker_refs = geminidataanalytics.LookerExploreReferences(
+                explore_references=[looker_explore_reference]
+            )
+            
+        _cached_datasource_refs = geminidataanalytics.DatasourceReferences(
+            looker=looker_refs,
         )
     
     return _cached_datasource_refs
+
+def _create_chat_request(inline_context, messages):
+    from google.cloud import geminidataanalytics
+    chat_kwargs = {
+        'inline_context': inline_context,
+        'parent': f"projects/{PROJECT_ID}/locations/global",
+        'messages': messages,
+    }
+    
+    # Ensure _get_cached_datasource was run so _cached_credentials is initialized
+    _get_cached_datasource()
+    
+    if 'credentials' in geminidataanalytics.ChatRequest.pb().DESCRIPTOR.fields_by_name and _cached_credentials:
+        chat_kwargs['credentials'] = _cached_credentials
+        
+    return geminidataanalytics.ChatRequest(**chat_kwargs)
 
 def fast_query(question: str, history: list = []):
     """
@@ -647,11 +673,7 @@ def fast_query(question: str, history: list = []):
     current_msg.user_message.text = final_question
     messages.append(current_msg)
     
-    request = geminidataanalytics.ChatRequest(
-        inline_context=inline_context,
-        parent=f"projects/{PROJECT_ID}/locations/global",
-        messages=messages,
-    )
+    request = _create_chat_request(inline_context, messages)
     
     
     # Retry loop for handling "DataResult not found" errors caused by model hallucination
@@ -810,11 +832,7 @@ def fast_query(question: str, history: list = []):
                 messages.append(correction_msg)
                 
                 # Update request with new messages
-                request = geminidataanalytics.ChatRequest(
-                    inline_context=inline_context,
-                    parent=f"projects/{PROJECT_ID}/locations/global",
-                    messages=messages,
-                )
+                request = _create_chat_request(inline_context, messages)
                 continue # Retry
             
             elif "CHART_GENERATION" in error_str and attempt < max_retries:
@@ -826,11 +844,7 @@ def fast_query(question: str, history: list = []):
                 messages.append(correction_msg)
                 
                 # Update request with new messages
-                request = geminidataanalytics.ChatRequest(
-                    inline_context=inline_context,
-                    parent=f"projects/{PROJECT_ID}/locations/global",
-                    messages=messages,
-                )
+                request = _create_chat_request(inline_context, messages)
                 continue # Retry
             
             elif "datasource(s) not found" in error_str.lower() and attempt < max_retries:
@@ -842,11 +856,7 @@ def fast_query(question: str, history: list = []):
                 messages.append(correction_msg)
                 
                 # Update request with new messages
-                request = geminidataanalytics.ChatRequest(
-                    inline_context=inline_context,
-                    parent=f"projects/{PROJECT_ID}/locations/global",
-                    messages=messages,
-                )
+                request = _create_chat_request(inline_context, messages)
                 continue # Retry
                 yield {"type": "error", "content": error_str}
                 break
@@ -1129,11 +1139,7 @@ def get_insights(question: str):
     messages = [geminidataanalytics.Message()]
     messages[0].user_message.text = question
 
-    request = geminidataanalytics.ChatRequest(
-        inline_context=inline_context,
-        parent=f"projects/{PROJECT_ID}/locations/global",
-        messages=messages,
-    )
+    request = _create_chat_request(inline_context, messages)
 
     log_thought(f"Analyzing question: {question}")
     
