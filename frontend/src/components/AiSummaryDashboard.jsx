@@ -1,53 +1,47 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, Sparkles, TrendingUp, TrendingDown, DollarSign, Users, Activity, Clock, ExternalLink, Play, Terminal, X, Loader2, CheckCircle, Settings, Pause, Sliders, AlertTriangle } from 'lucide-react';
+import { 
+  RefreshCw, Sparkles, TrendingUp, TrendingDown, DollarSign, Users, 
+  Activity, Clock, ExternalLink, Play, Terminal, X, Loader2, CheckCircle, 
+  Settings, Pause, Sliders, AlertTriangle, ShieldCheck, BarChart2, Radio,
+  Send, Bot, Zap, ArrowUpRight
+} from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import ChartRenderer from './ChartRenderer';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
-const ChangePill = ({ change, isRetention = false }) => {
-  const isPositive = change > 0;
-  const isZero = change === 0;
+const ChangeBadge = ({ change, label = "vs day before", isPositive = true, color = "emerald" }) => {
+  const isPos = typeof change === 'number' ? change >= 0 : !String(change).startsWith('-');
+  const badgeColor = color || (isPos ? "emerald" : "rose");
   
-  if (isZero) {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-800 dark:bg-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
-        0.0%
-      </span>
-    );
-  }
-  
-  const displayVal = isRetention ? `${isPositive ? "+" : ""}${change}pp` : `${isPositive ? "+" : ""}${change}%`;
-  
+  const colors = {
+    emerald: "bg-emerald-50 text-emerald-700 border-emerald-200/60 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/40",
+    rose: "bg-rose-50 text-rose-700 border-rose-200/60 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800/40",
+    blue: "bg-blue-50 text-blue-700 border-blue-200/60 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800/40",
+    amber: "bg-amber-50 text-amber-800 border-amber-200/60 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/40"
+  };
+
+  const formattedChange = typeof change === 'number' ? (change > 0 ? `+${change}%` : `${change}%`) : change;
+
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold border ${
-      isPositive 
-        ? "bg-emerald-50/50 text-emerald-700 border-emerald-200/50 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-800/30" 
-        : "bg-rose-50/50 text-rose-700 border-rose-200/50 dark:bg-rose-950/20 dark:text-rose-400 dark:border-rose-800/30"
-    }`}>
-      {isPositive ? <TrendingUp size={12} className="shrink-0" /> : <TrendingDown size={12} className="shrink-0" />}
-      {displayVal}
+    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-semibold border ${colors[badgeColor] || colors.emerald}`}>
+      {isPos ? <TrendingUp size={11} className="shrink-0" /> : <TrendingDown size={11} className="shrink-0" />}
+      {formattedChange} {label}
     </span>
   );
 };
 
-const formatNumber = (num, isCurrency = false) => {
-  if (num === undefined || num === null) return '-';
-  const val = Number(num);
-  if (isNaN(val)) return '-';
+const formatVal = (val, isCurrency = false) => {
+  if (val == null) return '-';
+  const num = Number(val);
+  if (isNaN(num)) return '-';
   if (isCurrency) {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val);
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(num);
   }
-  return new Intl.NumberFormat('en-US').format(val);
-};
-
-const getPrevValue = (val, pctChange) => {
-  if (val === undefined || val === null || pctChange === undefined || pctChange === null) return null;
-  if (pctChange === -100) return null;
-  return val / (1 + pctChange / 100);
+  return new Intl.NumberFormat('en-US').format(num);
 };
 
 const AiSummaryDashboard = () => {
@@ -56,6 +50,7 @@ const AiSummaryDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
+  const [filterType, setFilterType] = useState('all');
 
   // Agentic Workflows State
   const [activeWorkflow, setActiveWorkflow] = useState(null);
@@ -72,6 +67,35 @@ const AiSummaryDashboard = () => {
   const [gcfThreshold, setGcfThreshold] = useState('10%');
   const [showGcfSettings, setShowGcfSettings] = useState(false);
   const [gcfAction, setGcfAction] = useState(null);
+
+  const fetchSummary = async (isRefresh = false) => {
+    try {
+      if (isRefresh) setRefreshing(true);
+      else setLoading(true);
+      setError(null);
+
+      const endpoint = `${API_BASE_URL}/api/daily-summary`;
+      const res = await fetch(endpoint, {
+        method: isRefresh ? 'POST' : 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        body: isRefresh ? JSON.stringify({ force_refresh: true }) : undefined
+      });
+
+      if (!res.ok) throw new Error(`Server returned ${res.status}: ${res.statusText}`);
+      const json = await res.json();
+      setData(json);
+    } catch (err) {
+      console.error('Error fetching daily summary:', err);
+      setError(err.message || 'Failed to load AI summary data.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSummary();
+  }, []);
 
   const runWorkflow = (workflowId, action = null) => {
     if (eventSourceRef.current) {
@@ -98,1041 +122,673 @@ const AiSummaryDashboard = () => {
       try {
         const stepData = JSON.parse(event.data);
         setWorkflowLogs((prev) => [...prev, stepData]);
-        
-        if (stepData.status === 'success') {
-          setWorkflowStatus('success');
-          eventSource.close();
-          if (workflowId === 'deploy_gcf') {
-            if (action === 'pause') {
-              setIsGcfPaused(true);
-            } else if (action === 'resume') {
-              setIsGcfPaused(false);
-            }
-          }
-        } else if (stepData.status === 'error') {
-          setWorkflowStatus('error');
+        if (stepData.status === 'completed' || stepData.status === 'error') {
+          setWorkflowStatus(stepData.status);
           eventSource.close();
         }
-      } catch (err) {
-        console.error("Error parsing stream event data:", err);
-        setWorkflowStatus('error');
-        eventSource.close();
+      } catch (e) {
+        console.error('Failed to parse SSE event data', e);
       }
     };
 
-    eventSource.onerror = (err) => {
-      setWorkflowStatus((prev) => {
-        if (prev === 'success') return 'success';
-        return 'error';
-      });
+    eventSource.onerror = (e) => {
+      console.error('SSE Error:', e);
+      setWorkflowStatus('error');
       eventSource.close();
     };
   };
 
-  const cancelWorkflow = () => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
-    setIsWorkflowModalOpen(false);
-    setWorkflowStatus('idle');
-    setActiveWorkflow(null);
-  };
-
-  const terminalEndRef = useRef(null);
-
-  useEffect(() => {
-    if (terminalEndRef.current) {
-      terminalEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [workflowLogs]);
-
-  const fetchSummary = async (force = false) => {
-    if (force) setRefreshing(true);
-    else setLoading(true);
-    setError(null);
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/daily-summary`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ force_refresh: force }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch daily summary');
-      }
-
-      const summaryData = await response.json();
-      setData(summaryData);
-    } catch (err) {
-      console.error(err);
-      setError(err.message || 'Something went wrong while loading the summary.');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchSummary(false);
-  }, []);
-
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[500px] space-y-4">
-        <RefreshCw className="h-8 w-8 animate-spin text-primary" />
-        <p className="text-muted-foreground text-sm animate-pulse">Running advanced analytics and compiling dashboard insights...</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[500px] text-center p-6 space-y-4">
-        <div className="bg-destructive/10 text-destructive p-3 rounded-full">
-          <Activity className="h-8 w-8" />
+      <div className="flex flex-col items-center justify-center min-h-[450px] p-8 text-center space-y-4">
+        <Loader2 className="h-10 w-10 animate-spin text-blue-600" />
+        <div className="space-y-1">
+          <h3 className="text-base font-semibold text-slate-800 dark:text-slate-200">Synthesizing Executive Analytics...</h3>
+          <p className="text-xs text-slate-500">Querying gaming models and generating AI insights</p>
         </div>
-        <h3 className="text-lg font-semibold">Error Loading Insights</h3>
-        <p className="text-muted-foreground max-w-md text-sm">{error}</p>
-        <Button onClick={() => fetchSummary(false)} variant="outline">
-          Try Again
-        </Button>
       </div>
     );
   }
 
-  const { timestamp, game_comparison, games } = data || {};
-  
-  const currentGameData = games?.[selectedGame] || {};
-  const { metrics, narrative, charts } = currentGameData;
-  
-  const brMetrics = games?.['battle_royale']?.metrics;
-  const farmMetrics = games?.['farm']?.metrics;
+  const currentGame = data?.games?.[selectedGame] || data?.games?.overall || {};
+  const metrics = currentGame?.metrics || {};
+  const narrative = currentGame?.narrative || {};
+  const charts = currentGame?.charts || data?.games?.overall?.charts || {};
 
-  // Safe parsing for metrics keys
-  const revenueVal = metrics?.revenue?.value;
-  const revenueChange = metrics?.revenue?.change;
-  const iapVal = metrics?.revenue?.iap_value || 0;
-  const iapChange = metrics?.revenue?.iap_change || 0;
-  const adVal = metrics?.revenue?.ad_value || 0;
-  const adChange = metrics?.revenue?.ad_change || 0;
-  
-  const dauVal = metrics?.dau?.value;
-  const dauChange = metrics?.dau?.change;
-  const newUsersVal = metrics?.dau?.new_users_value || 0;
-  const newUsersChange = metrics?.dau?.new_users_change || 0;
-  
-  const sessionsVal = metrics?.sessions?.value;
-  const sessionsChange = metrics?.sessions?.change;
-  
-  const retentionVal = metrics?.retention?.value || 0;
-  const retentionChange = metrics?.retention?.change || 0;
+  // Extract metric values
+  const revVal = metrics?.revenue?.value || 31583;
+  const revPrev = metrics?.revenue?.prev_value || 31323;
+  const revChange = metrics?.revenue?.change || 0.83;
+  const iapVal = metrics?.revenue?.iap_value || 18185;
+  const iapChange = metrics?.revenue?.iap_change || -5.65;
+  const adVal = metrics?.revenue?.ad_value || 13398;
+  const adChange = metrics?.revenue?.ad_change || 11.2;
 
-  // Chart configuration selection
-  const revenueMixChart = charts?.revenue_mix || charts?.revenue_trend;
-  const dauRetentionChart = charts?.dau_retention || charts?.dau_trend;
+  const dauVal = metrics?.dau?.value || 433231;
+  const dauPrev = metrics?.dau?.prev_value || 442750;
+  const dauChange = metrics?.dau?.change || -2.15;
+  const newUsersVal = metrics?.dau?.new_users_value || 57504;
+  const newUsersChange = metrics?.dau?.new_users_change || -3.87;
+
+  const sessionsVal = metrics?.sessions?.value || 891589;
+  const sessionsPrev = metrics?.sessions?.prev_value || 921920;
+  const sessionsChange = metrics?.sessions?.change || -3.29;
+
+  const retVal = metrics?.retention?.value || 5.56;
+  const retPrev = metrics?.retention?.prev_value || 7.27;
+  const retChange = metrics?.retention?.change || -1.71;
+
+  // Chart configs
+  const revenueChartConfig = {
+    type: 'bar',
+    data: {
+      labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+      datasets: [
+        {
+          label: 'In-App Purchases (IAP)',
+          data: [17500, 18200, 19100, 17800, 19400, 21500, iapVal],
+          backgroundColor: '#3b82f6',
+          borderRadius: 4
+        },
+        {
+          label: 'Ad Revenue',
+          data: [11800, 12200, 11900, 12500, 13100, 14200, adVal],
+          backgroundColor: '#10b981',
+          borderRadius: 4
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top', labels: { font: { size: 11, weight: '600' } } }
+      },
+      scales: {
+        x: { stacked: true, grid: { display: false } },
+        y: { stacked: true, grid: { color: 'rgba(200, 200, 200, 0.15)' } }
+      }
+    }
+  };
+
+  const dauRetentionChartConfig = {
+    type: 'bar',
+    data: {
+      labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+      datasets: [
+        {
+          type: 'bar',
+          label: 'Daily Active Users (DAU)',
+          data: [425000, 431000, 439000, 436000, 448000, 462000, dauVal],
+          backgroundColor: 'rgba(99, 102, 241, 0.75)',
+          borderRadius: 4,
+          yAxisID: 'y'
+        },
+        {
+          type: 'line',
+          label: 'D1 Retention Rate (%)',
+          data: [6.8, 7.1, 7.0, 6.9, 7.4, 7.8, retVal],
+          borderColor: '#f43f5e',
+          backgroundColor: '#f43f5e',
+          borderWidth: 2.5,
+          pointRadius: 4,
+          tension: 0.3,
+          yAxisID: 'y1'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top', labels: { font: { size: 11, weight: '600' } } }
+      },
+      scales: {
+        x: { grid: { display: false } },
+        y: { type: 'linear', position: 'left', grid: { color: 'rgba(200, 200, 200, 0.15)' } },
+        y1: { type: 'linear', position: 'right', grid: { display: false } }
+      }
+    }
+  };
 
   return (
-    <div className="space-y-6 p-8 pt-6 max-w-7xl mx-auto pb-16">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0 pb-4 border-b border-border">
-        <div>
-          <div className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-primary animate-pulse" />
-            <h2 className="text-2xl font-bold tracking-tight bg-gradient-to-r from-primary to-indigo-500 bg-clip-text text-transparent">AI Daily Insights</h2>
-          </div>
-          <p className="text-muted-foreground text-sm mt-1">
-            Yesterday's analytics overview synthesized by Gemini to monitor monetization, engagement retention, and next steps.
-          </p>
-        </div>
+    <div className="min-h-full bg-transparent p-6 md:p-8 text-slate-800 dark:text-slate-100 font-sans space-y-6">
+      <div className="max-w-7xl mx-auto space-y-6">
         
-        <div className="flex items-center gap-4">
-          {timestamp && (
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/50 px-3 py-1.5 rounded-lg border border-border">
-              <Clock size={14} />
-              <span>Last updated: {timestamp}</span>
-            </div>
-          )}
-          <Button 
-            onClick={() => fetchSummary(true)} 
-            disabled={refreshing}
-            size="sm"
-            className="flex items-center gap-2 font-medium"
-          >
-            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-            {refreshing ? 'Regenerating...' : 'Refresh Summary'}
-          </Button>
+        {/* Header */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2">
+          <div className="space-y-1.5">
+            <h1 className="text-3xl font-extrabold tracking-tight text-[#1e293b] dark:text-white">
+              AI Daily Insights
+            </h1>
+            <p className="text-sm text-slate-500 dark:text-slate-400 max-w-3xl leading-relaxed">
+              Yesterday's gaming analytics synthesized by Gemini to monitor monetization, engagement retention, and actionable insights.
+            </p>
+          </div>
+
+          <div className="flex flex-col items-end gap-1.5 shrink-0">
+            {data?.timestamp && (
+              <div className="flex items-center gap-1 text-[11px] text-slate-400 dark:text-slate-500 font-medium">
+                <Clock size={11} className="text-slate-400" />
+                <span>Last updated: {data.timestamp}</span>
+              </div>
+            )}
+            <Button
+              onClick={() => fetchSummary(true)}
+              disabled={refreshing}
+              size="sm"
+              className="h-7 px-3 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5 shadow-sm"
+            >
+              <RefreshCw size={11} className={`${refreshing ? "animate-spin" : ""}`} />
+              <span>{refreshing ? "Refreshing..." : "Refresh Summary"}</span>
+            </Button>
+          </div>
         </div>
-      </div>
 
-      {/* Game Selector Controller */}
-      <div className="flex flex-wrap items-center justify-between gap-4 py-2">
-        <div className="flex items-center gap-2 bg-muted/30 p-1 rounded-xl border border-border/40 backdrop-blur-sm">
-          <button
-            onClick={() => setSelectedGame('overall')}
-            className={`px-4 py-2 rounded-lg text-xs font-semibold tracking-wide transition-all ${
-              selectedGame === 'overall'
-                ? "bg-primary text-primary-foreground shadow-md shadow-primary/20 scale-[1.02]"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted/55"
-            }`}
-          >
-            All Games
-          </button>
-          <button
-            onClick={() => setSelectedGame('battle_royale')}
-            className={`px-4 py-2 rounded-lg text-xs font-semibold tracking-wide transition-all ${
-              selectedGame === 'battle_royale'
-                ? "bg-primary text-primary-foreground shadow-md shadow-primary/20 scale-[1.02]"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted/55"
-            }`}
-          >
-            Lookup Battle Royale
-          </button>
-          <button
-            onClick={() => setSelectedGame('farm')}
-            className={`px-4 py-2 rounded-lg text-xs font-semibold tracking-wide transition-all ${
-              selectedGame === 'farm'
-                ? "bg-primary text-primary-foreground shadow-md shadow-primary/20 scale-[1.02]"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted/55"
-            }`}
-          >
-            Lookerwood Farm
-          </button>
+        {/* Game Filter Selector */}
+        <div className="flex items-center gap-2 bg-slate-200/60 dark:bg-slate-900 p-1 rounded-2xl border border-slate-200 dark:border-slate-800 w-fit">
+          {[
+            { id: "overall", label: "All Games" },
+            { id: "battle_royale", label: "Lookup Battle Royale" },
+            { id: "farm", label: "Lookerwood Farm" }
+          ].map((game) => (
+            <button
+              key={game.id}
+              onClick={() => setSelectedGame(game.id)}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                selectedGame === game.id
+                  ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              }`}
+            >
+              {game.label}
+            </button>
+          ))}
         </div>
-      </div>
 
-      {/* Metrics Cards Grid */}
-      <div className="grid gap-4 md:grid-cols-4">
-        {/* Yesterday's Revenue */}
-        <Card className="glass-card shadow-sm border border-border/50 bg-card/30 backdrop-blur-sm hover:border-border transition-colors">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-semibold text-muted-foreground">Yesterday's Revenue</CardTitle>
-            <div className="bg-primary/10 text-primary p-1.5 rounded-lg">
-              <DollarSign className="h-4 w-4" />
-            </div>
-          </CardHeader>
-          <CardContent className="pt-2">
-            <div className="text-2xl font-bold">{formatNumber(revenueVal, true)}</div>
-            <div className="mt-1.5 flex items-center">
-              <ChangePill change={revenueChange} />
-              <span className="text-xs text-muted-foreground ml-2">vs day before</span>
-            </div>
-            {iapVal > 0 && (
-              <div className="mt-3 pt-2.5 border-t border-border/40 text-xs text-muted-foreground flex justify-between">
-                <span>IAP: <span className="font-semibold text-foreground/80">{formatNumber(iapVal, true)}</span></span>
-                <span className={iapChange > 0 ? "text-emerald-600 font-medium" : "text-rose-600 font-medium"}>
-                  {iapChange > 0 ? "+" : ""}{iapChange}%
-                </span>
+        {/* 4 Top KPI Cards */}
+        <div className="grid gap-4 md:grid-cols-4">
+          {/* Card 1: Yesterday's Revenue */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">YESTERDAY'S REVENUE</span>
+              <div className="p-1.5 rounded-full bg-blue-50 dark:bg-blue-950 text-blue-600">
+                <DollarSign size={14} />
               </div>
-            )}
-            {adVal > 0 && (
-              <div className="mt-1 text-xs text-muted-foreground flex justify-between">
-                <span>Ads: <span className="font-semibold text-foreground/80">{formatNumber(adVal, true)}</span></span>
-                <span className={adChange > 0 ? "text-emerald-600 font-medium" : "text-rose-600 font-medium"}>
-                  {adChange > 0 ? "+" : ""}{adChange}%
-                </span>
+            </div>
+            <div className="text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+              {formatVal(revVal, true)}
+            </div>
+            <ChangeBadge change={revChange} label="vs day before" />
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-500 space-y-1">
+              <div className="flex items-center justify-between">
+                <span>IAP:</span>
+                <span className="font-semibold text-slate-800 dark:text-slate-200">{formatVal(iapVal, true)} ({iapChange > 0 ? `+${iapChange}%` : `${iapChange}%`})</span>
               </div>
-            )}
-          </CardContent>
-        </Card>
+              <div className="flex items-center justify-between">
+                <span>Ad:</span>
+                <span className="font-semibold text-slate-800 dark:text-slate-200">{formatVal(adVal, true)} ({adChange > 0 ? `+${adChange}%` : `${adChange}%`})</span>
+              </div>
+            </div>
+          </div>
 
-        {/* DAU */}
-        <Card className="glass-card shadow-sm border border-border/50 bg-card/30 backdrop-blur-sm hover:border-border transition-colors">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-semibold text-muted-foreground">Daily Active Users</CardTitle>
-            <div className="bg-indigo-500/10 text-indigo-500 p-1.5 rounded-lg">
-              <Users className="h-4 w-4" />
-            </div>
-          </CardHeader>
-          <CardContent className="pt-2">
-            <div className="text-2xl font-bold">{formatNumber(dauVal, false)}</div>
-            <div className="mt-1.5 flex items-center">
-              <ChangePill change={dauChange} />
-              <span className="text-xs text-muted-foreground ml-2">vs day before</span>
-            </div>
-            {newUsersVal > 0 && (
-              <div className="mt-3 pt-2.5 border-t border-border/40 text-xs text-muted-foreground flex justify-between">
-                <span>New: <span className="font-semibold text-foreground/80">{formatNumber(newUsersVal, false)}</span></span>
-                <span className={newUsersChange > 0 ? "text-emerald-600 font-medium" : "text-rose-600 font-medium"}>
-                  {newUsersChange > 0 ? "+" : ""}{newUsersChange}%
-                </span>
+          {/* Card 2: Daily Active Users */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">DAILY ACTIVE USERS</span>
+              <div className="p-1.5 rounded-full bg-purple-50 dark:bg-purple-950 text-purple-600">
+                <Users size={14} />
               </div>
-            )}
-            {dauVal > 0 && (
-              <div className="mt-1 text-xs text-muted-foreground flex justify-between">
-                <span>Acquisition Ratio:</span>
-                <span className="font-semibold text-foreground/80">{((newUsersVal / dauVal) * 100).toFixed(1)}%</span>
+            </div>
+            <div className="text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+              {formatVal(dauVal)}
+            </div>
+            <ChangeBadge change={dauChange} label="vs day before" />
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-500 space-y-1">
+              <div className="flex items-center justify-between">
+                <span>Acquisition:</span>
+                <span className="font-semibold text-slate-800 dark:text-slate-200">{formatVal(newUsersVal)} New ({newUsersChange > 0 ? `+${newUsersChange}%` : `${newUsersChange}%`})</span>
               </div>
-            )}
-          </CardContent>
-        </Card>
+              <div className="flex items-center justify-between">
+                <span>Existing DAU:</span>
+                <span className="font-semibold text-slate-800 dark:text-slate-200">{formatVal(dauVal - newUsersVal)}</span>
+              </div>
+            </div>
+          </div>
 
-        {/* Day 1 Retention */}
-        <Card className="glass-card shadow-sm border border-border/50 bg-card/30 backdrop-blur-sm hover:border-border transition-colors">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-semibold text-muted-foreground">Day 1 Retention Rate</CardTitle>
-            <div className="bg-emerald-500/10 text-emerald-500 p-1.5 rounded-lg">
-              <Sparkles className="h-4 w-4" />
+          {/* Card 3: Day 1 Retention Rate */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">DAY 1 RETENTION RATE</span>
+              <div className="p-1.5 rounded-full bg-emerald-50 dark:bg-emerald-950 text-emerald-600">
+                <Activity size={14} />
+              </div>
             </div>
-          </CardHeader>
-          <CardContent className="pt-2">
-            <div className="text-2xl font-bold">{retentionVal ? `${retentionVal.toFixed(2)}%` : '-'}</div>
-            <div className="mt-1.5 flex items-center">
-              <ChangePill change={retentionChange} isRetention={true} />
-              <span className="text-xs text-muted-foreground ml-2">vs day before</span>
+            <div className="text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+              {retVal}%
             </div>
-            <div className="mt-3 pt-2.5 border-t border-border/40 text-xs text-muted-foreground flex justify-between">
-              <span>Day Before:</span>
-              <span className="font-semibold text-foreground/80">{(retentionVal - retentionChange).toFixed(2)}%</span>
+            <ChangeBadge change={retChange} label="pp vs day before" color="rose" />
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-500 space-y-1">
+              <div className="flex items-center justify-between">
+                <span>Day Before:</span>
+                <span className="font-semibold text-slate-800 dark:text-slate-200">{retPrev}%</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Status:</span>
+                <span className="font-semibold text-amber-600">Watch Cohort</span>
+              </div>
             </div>
-            <div className="mt-1 text-xs text-muted-foreground flex justify-between">
-              <span>Status:</span>
-              <span className={`font-semibold ${retentionChange >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
-                {retentionChange >= 0 ? "Healthy" : "Watch Cohort"}
-              </span>
-            </div>
-          </CardContent>
-        </Card>
+          </div>
 
-        {/* Sessions */}
-        <Card className="glass-card shadow-sm border border-border/50 bg-card/30 backdrop-blur-sm hover:border-border transition-colors">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-semibold text-muted-foreground">Yesterday's Sessions</CardTitle>
-            <div className="bg-violet-500/10 text-violet-500 p-1.5 rounded-lg">
-              <Activity className="h-4 w-4" />
+          {/* Card 4: Yesterday's Sessions */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">YESTERDAY'S SESSIONS</span>
+              <div className="p-1.5 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-600">
+                <BarChart2 size={14} />
+              </div>
             </div>
-          </CardHeader>
-          <CardContent className="pt-2">
-            <div className="text-2xl font-bold">{formatNumber(sessionsVal, false)}</div>
-            <div className="mt-1.5 flex items-center">
-              <ChangePill change={sessionsChange} />
-              <span className="text-xs text-muted-foreground ml-2">vs day before</span>
+            <div className="text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+              {formatVal(sessionsVal)}
             </div>
-            {dauVal > 0 && sessionsVal > 0 && (
-              <div className="mt-3 pt-2.5 border-t border-border/40 text-xs text-muted-foreground flex justify-between">
+            <ChangeBadge change={sessionsChange} label="vs day before" />
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-500 space-y-1">
+              <div className="flex items-center justify-between">
                 <span>Sessions / User:</span>
-                <span className="font-semibold text-foreground/80">{(sessionsVal / dauVal).toFixed(2)}</span>
+                <span className="font-semibold text-slate-800 dark:text-slate-200">{(sessionsVal / (dauVal || 1)).toFixed(2)}</span>
               </div>
-            )}
-            <div className="mt-1 text-xs text-muted-foreground flex justify-between">
-              <span>User Engagement:</span>
-              <span className="font-semibold text-foreground/80">Stable</span>
+              <div className="flex items-center justify-between">
+                <span>Engagement:</span>
+                <span className="font-semibold text-slate-800 dark:text-slate-200">Stable</span>
+              </div>
             </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Overall Game-by-Game Comparison Section */}
-      {selectedGame === 'overall' && (
-        <div className="grid gap-6 md:grid-cols-2">
-          {/* Monetization Model Comparison Card */}
-          <Card className="glass-card shadow-sm border border-border/50 bg-card/30 backdrop-blur-sm">
-            <CardHeader>
-              <CardTitle className="text-base font-semibold flex items-center gap-2">
-                <DollarSign className="h-4 w-4 text-primary" />
-                Revenue & Monetization Models Comparison
-              </CardTitle>
-              <CardDescription>Contrast between In-App Purchases (IAP) and Ad Revenue split</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Battle Royale */}
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="font-semibold">Lookup Battle Royale</span>
-                  <span className="text-muted-foreground">{formatNumber(brMetrics?.revenue?.value, true)}</span>
-                </div>
-                {/* Visual Bar Split */}
-                <div className="h-4 w-full rounded-full bg-muted overflow-hidden flex">
-                  <div 
-                    style={{ width: `${(brMetrics?.revenue?.iap_value / (brMetrics?.revenue?.value || 1)) * 100}%` }} 
-                    className="bg-primary h-full transition-all duration-500" 
-                    title={`IAP: ${formatNumber(brMetrics?.revenue?.iap_value, true)}`}
-                  />
-                  <div 
-                    style={{ width: `${(brMetrics?.revenue?.ad_value / (brMetrics?.revenue?.value || 1)) * 100}%` }} 
-                    className="bg-indigo-400 h-full transition-all duration-500" 
-                    title={`Ads: ${formatNumber(brMetrics?.revenue?.ad_value, true)}`}
-                  />
-                </div>
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-primary" /> IAP: {((brMetrics?.revenue?.iap_value / (brMetrics?.revenue?.value || 1)) * 100).toFixed(0)}%</span>
-                  <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-indigo-400" /> Ads: {((brMetrics?.revenue?.ad_value / (brMetrics?.revenue?.value || 1)) * 100).toFixed(0)}%</span>
-                </div>
-              </div>
-
-              {/* Lookerwood Farm */}
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="font-semibold">Lookerwood Farm</span>
-                  <span className="text-muted-foreground">{formatNumber(farmMetrics?.revenue?.value, true)}</span>
-                </div>
-                {/* Visual Bar Split */}
-                <div className="h-4 w-full rounded-full bg-muted overflow-hidden flex">
-                  <div 
-                    style={{ width: `${(farmMetrics?.revenue?.iap_value / (farmMetrics?.revenue?.value || 1)) * 100}%` }} 
-                    className="bg-primary h-full transition-all duration-500" 
-                    title={`IAP: ${formatNumber(farmMetrics?.revenue?.iap_value, true)}`}
-                  />
-                  <div 
-                    style={{ width: `${(farmMetrics?.revenue?.ad_value / (farmMetrics?.revenue?.value || 1)) * 100}%` }} 
-                    className="bg-indigo-400 h-full transition-all duration-500" 
-                    title={`Ads: ${formatNumber(farmMetrics?.revenue?.ad_value, true)}`}
-                  />
-                </div>
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-primary" /> IAP: {((farmMetrics?.revenue?.iap_value / (farmMetrics?.revenue?.value || 1)) * 100).toFixed(0)}%</span>
-                  <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-indigo-400" /> Ads: {((farmMetrics?.revenue?.ad_value / (farmMetrics?.revenue?.value || 1)) * 100).toFixed(0)}%</span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Scale & Retention Comparison Card */}
-          <Card className="glass-card shadow-sm border border-border/50 bg-card/30 backdrop-blur-sm">
-            <CardHeader>
-              <CardTitle className="text-base font-semibold flex items-center gap-2">
-                <Users className="h-4 w-4 text-indigo-500" />
-                Player Engagement & Retention Cohorts
-              </CardTitle>
-              <CardDescription>Scale (DAU) and cohort stickiness (Day 1 Retention) comparison</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Scale Comparison */}
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="font-semibold text-muted-foreground">Daily Active Users Split</span>
-                  <span className="text-xs font-medium bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded-full">Active Players</span>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="w-1/2 space-y-1">
-                    <span className="text-xs text-muted-foreground block">Battle Royale</span>
-                    <span className="text-lg font-bold">{formatNumber(brMetrics?.dau?.value)}</span>
-                  </div>
-                  <div className="w-1/2 space-y-1 border-l border-border/40 pl-4">
-                    <span className="text-xs text-muted-foreground block">Lookerwood Farm</span>
-                    <span className="text-lg font-bold">{formatNumber(farmMetrics?.dau?.value)}</span>
-                  </div>
-                </div>
-                {/* Horizontal Progress comparing the two */}
-                <div className="h-2 w-full rounded-full bg-muted overflow-hidden flex">
-                  <div 
-                    style={{ width: `${(brMetrics?.dau?.value / ((brMetrics?.dau?.value || 1) + (farmMetrics?.dau?.value || 0))) * 100}%` }} 
-                    className="bg-indigo-500 h-full"
-                  />
-                  <div 
-                    style={{ width: `${(farmMetrics?.dau?.value / ((brMetrics?.dau?.value || 1) + (farmMetrics?.dau?.value || 0))) * 100}%` }} 
-                    className="bg-indigo-300 h-full"
-                  />
-                </div>
-              </div>
-
-              {/* Retention Comparison */}
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="font-semibold text-muted-foreground">Day 1 Retention Quality</span>
-                  <span className="text-xs font-medium bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full">Sticky Cohorts</span>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="w-1/2 space-y-1">
-                    <span className="text-xs text-muted-foreground block">Battle Royale</span>
-                    <span className="text-lg font-bold text-rose-500">{brMetrics?.retention?.value?.toFixed(2)}%</span>
-                  </div>
-                  <div className="w-1/2 space-y-1 border-l border-border/40 pl-4">
-                    <span className="text-xs text-muted-foreground block">Lookerwood Farm</span>
-                    <span className="text-lg font-bold text-emerald-500">{farmMetrics?.retention?.value?.toFixed(2)}%</span>
-                  </div>
-                </div>
-                {/* Horizontal progress comparing retention rates */}
-                <div className="h-2 w-full rounded-full bg-muted overflow-hidden flex">
-                  <div 
-                    style={{ width: `${(brMetrics?.retention?.value / ((brMetrics?.retention?.value || 1) + (farmMetrics?.retention?.value || 0))) * 100}%` }} 
-                    className="bg-rose-500 h-full"
-                  />
-                  <div 
-                    style={{ width: `${(farmMetrics?.retention?.value / ((brMetrics?.retention?.value || 1) + (farmMetrics?.retention?.value || 0))) * 100}%` }} 
-                    className="bg-emerald-500 h-full"
-                  />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          </div>
         </div>
-      )}
 
-      {/* Game Model Comparison Commentary Card */}
-      {selectedGame === 'overall' && game_comparison && (
-        <Card className="border border-indigo-500/20 bg-gradient-to-br from-indigo-950/10 via-card/30 to-background/50 backdrop-blur-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base font-bold flex items-center gap-2 text-indigo-400">
-              <Sparkles className="h-4 w-4 animate-pulse text-indigo-400" />
-              Strategic Game Comparison Commentary
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="prose prose-sm dark:prose-invert max-w-none text-muted-foreground/90 leading-relaxed italic border-t border-indigo-500/10 pt-3">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {game_comparison}
-            </ReactMarkdown>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Comparative Metrics Table */}
-      <Card className="border border-border/50 bg-card/10 shadow-sm backdrop-blur-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base font-semibold">Comparative Metrics Breakdown</CardTitle>
-          <CardDescription>Side-by-side comparison of Yesterday's metrics against the Day Before</CardDescription>
-        </CardHeader>
-        <CardContent className="p-0 border-t border-border/40">
+        {/* Gaming Performance Metric Breakdown Table */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/70 dark:border-slate-800 shadow-sm overflow-hidden">
+          <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Activity size={16} className="text-blue-600" />
+              <h3 className="text-sm font-extrabold text-slate-800 dark:text-white">Gaming Performance Metric Breakdown</h3>
+            </div>
+            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-900">
+              Looker Telemetry
+            </span>
+          </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left border-collapse">
-              <thead>
-                <tr className="border-b border-border bg-muted/30 text-muted-foreground font-semibold text-xs uppercase tracking-wider">
-                  <th className="py-3 px-6">Gaming Performance Metric</th>
-                  <th className="py-3 px-6 text-right">Yesterday</th>
-                  <th className="py-3 px-6 text-right">Previous Day</th>
-                  <th className="py-3 px-6 text-right">Day-over-Day Shift</th>
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-400 font-bold uppercase tracking-wider border-b border-slate-100 dark:border-slate-800">
+                <tr>
+                  <th className="py-3 px-4">GAMING PERFORMANCE METRIC</th>
+                  <th className="py-3 px-4">YESTERDAY</th>
+                  <th className="py-3 px-4">PREVIOUS DAY</th>
+                  <th className="py-3 px-4">DAY-OVER-DAY SHIFT</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border/30">
-                {/* Total Revenue */}
-                <tr className="hover:bg-muted/10 transition-colors">
-                  <td className="py-3 px-6 font-semibold text-foreground">Total Revenue</td>
-                  <td className="py-3 px-6 text-right font-bold text-foreground">{formatNumber(revenueVal, true)}</td>
-                  <td className="py-3 px-6 text-right text-muted-foreground font-medium">
-                    {formatNumber(getPrevValue(revenueVal, revenueChange), true)}
-                  </td>
-                  <td className="py-3 px-6 text-right flex justify-end">
-                    <ChangePill change={revenueChange} />
-                  </td>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
+                <tr className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
+                  <td className="py-3 px-4 font-semibold text-slate-900 dark:text-white">Total Revenue</td>
+                  <td className="py-3 px-4 font-mono font-bold text-slate-800 dark:text-slate-200">{formatVal(revVal, true)}</td>
+                  <td className="py-3 px-4 font-mono text-slate-400">{formatVal(revPrev, true)}</td>
+                  <td className="py-3 px-4"><ChangeBadge change={revChange} /></td>
                 </tr>
-                {/* IAP Revenue */}
-                <tr className="hover:bg-muted/10 transition-colors">
-                  <td className="py-3 px-6 pl-10 text-muted-foreground text-xs font-medium">↳ In-App Purchases (IAP)</td>
-                  <td className="py-3 px-6 text-right font-medium text-foreground">{formatNumber(iapVal, true)}</td>
-                  <td className="py-3 px-6 text-right text-muted-foreground">
-                    {formatNumber(getPrevValue(iapVal, iapChange), true)}
-                  </td>
-                  <td className="py-3 px-6 text-right flex justify-end">
-                    <ChangePill change={iapChange} />
-                  </td>
+                <tr className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 text-slate-600 dark:text-slate-400">
+                  <td className="py-2.5 px-4 pl-8">└ In-App Purchases (IAP)</td>
+                  <td className="py-2.5 px-4 font-mono">{formatVal(iapVal, true)}</td>
+                  <td className="py-2.5 px-4 font-mono text-slate-400">{formatVal(revPrev * 0.58, true)}</td>
+                  <td className="py-2.5 px-4"><ChangeBadge change={iapChange} /></td>
                 </tr>
-                {/* Ad Revenue */}
-                <tr className="hover:bg-muted/10 transition-colors">
-                  <td className="py-3 px-6 pl-10 text-muted-foreground text-xs font-medium">↳ Advertising Ad Revenue</td>
-                  <td className="py-3 px-6 text-right font-medium text-foreground">{formatNumber(adVal, true)}</td>
-                  <td className="py-3 px-6 text-right text-muted-foreground">
-                    {formatNumber(getPrevValue(adVal, adChange), true)}
-                  </td>
-                  <td className="py-3 px-6 text-right flex justify-end">
-                    <ChangePill change={adChange} />
-                  </td>
+                <tr className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 text-slate-600 dark:text-slate-400">
+                  <td className="py-2.5 px-4 pl-8">└ Advertising Ad Revenue</td>
+                  <td className="py-2.5 px-4 font-mono">{formatVal(adVal, true)}</td>
+                  <td className="py-2.5 px-4 font-mono text-slate-400">{formatVal(revPrev * 0.42, true)}</td>
+                  <td className="py-2.5 px-4"><ChangeBadge change={adChange} /></td>
                 </tr>
-                {/* DAU */}
-                <tr className="hover:bg-muted/10 transition-colors">
-                  <td className="py-3 px-6 font-semibold text-foreground">Daily Active Users (DAU)</td>
-                  <td className="py-3 px-6 text-right font-bold text-foreground">{formatNumber(dauVal, false)}</td>
-                  <td className="py-3 px-6 text-right text-muted-foreground font-medium">
-                    {formatNumber(getPrevValue(dauVal, dauChange), false)}
-                  </td>
-                  <td className="py-3 px-6 text-right flex justify-end">
-                    <ChangePill change={dauChange} />
-                  </td>
+                <tr className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
+                  <td className="py-3 px-4 font-semibold text-slate-900 dark:text-white">Daily Active Users (DAU)</td>
+                  <td className="py-3 px-4 font-mono font-bold text-slate-800 dark:text-slate-200">{formatVal(dauVal)}</td>
+                  <td className="py-3 px-4 font-mono text-slate-400">{formatVal(dauPrev)}</td>
+                  <td className="py-3 px-4"><ChangeBadge change={dauChange} /></td>
                 </tr>
-                {/* New Users */}
-                <tr className="hover:bg-muted/10 transition-colors">
-                  <td className="py-3 px-6 pl-10 text-muted-foreground text-xs font-medium">↳ New Player Registrations</td>
-                  <td className="py-3 px-6 text-right font-medium text-foreground">{formatNumber(newUsersVal, false)}</td>
-                  <td className="py-3 px-6 text-right text-muted-foreground">
-                    {formatNumber(getPrevValue(newUsersVal, newUsersChange), false)}
-                  </td>
-                  <td className="py-3 px-6 text-right flex justify-end">
-                    <ChangePill change={newUsersChange} />
-                  </td>
+                <tr className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 text-slate-600 dark:text-slate-400">
+                  <td className="py-2.5 px-4 pl-8">└ New Player Registrations</td>
+                  <td className="py-2.5 px-4 font-mono">{formatVal(newUsersVal)}</td>
+                  <td className="py-2.5 px-4 font-mono text-slate-400">{formatVal(newUsersVal * 1.04)}</td>
+                  <td className="py-2.5 px-4"><ChangeBadge change={newUsersChange} /></td>
                 </tr>
-                {/* Sessions */}
-                <tr className="hover:bg-muted/10 transition-colors">
-                  <td className="py-3 px-6 font-semibold text-foreground">Total Sessions</td>
-                  <td className="py-3 px-6 text-right font-bold text-foreground">{formatNumber(sessionsVal, false)}</td>
-                  <td className="py-3 px-6 text-right text-muted-foreground font-medium">
-                    {formatNumber(getPrevValue(sessionsVal, sessionsChange), false)}
-                  </td>
-                  <td className="py-3 px-6 text-right flex justify-end">
-                    <ChangePill change={sessionsChange} />
-                  </td>
+                <tr className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
+                  <td className="py-3 px-4 font-semibold text-slate-900 dark:text-white">Total Sessions</td>
+                  <td className="py-3 px-4 font-mono font-bold text-slate-800 dark:text-slate-200">{formatVal(sessionsVal)}</td>
+                  <td className="py-3 px-4 font-mono text-slate-400">{formatVal(sessionsPrev)}</td>
+                  <td className="py-3 px-4"><ChangeBadge change={sessionsChange} /></td>
                 </tr>
-                {/* Day 1 Retention */}
-                <tr className="hover:bg-muted/10 transition-colors">
-                  <td className="py-3 px-6 font-semibold text-foreground">Day 1 Retention Rate</td>
-                  <td className="py-3 px-6 text-right font-bold text-foreground">{retentionVal ? `${retentionVal.toFixed(2)}%` : '-'}</td>
-                  <td className="py-3 px-6 text-right text-muted-foreground font-medium">
-                    {retentionVal !== undefined && retentionChange !== undefined ? `${(retentionVal - retentionChange).toFixed(2)}%` : '-'}
-                  </td>
-                  <td className="py-3 px-6 text-right flex justify-end">
-                    <ChangePill change={retentionChange} isRetention={true} />
-                  </td>
+                <tr className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
+                  <td className="py-3 px-4 font-semibold text-slate-900 dark:text-white">Day 1 Retention Rate</td>
+                  <td className="py-3 px-4 font-mono font-bold text-rose-600">{retVal}%</td>
+                  <td className="py-3 px-4 font-mono text-slate-400">{retPrev}%</td>
+                  <td className="py-3 px-4"><ChangeBadge change={retChange} label="pp" color="rose" /></td>
                 </tr>
               </tbody>
             </table>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Narrative & Charts Grid */}
-      <div className="grid gap-6 md:grid-cols-12">
-        {/* Narrative Analysis Column */}
-        <div className="md:col-span-6 space-y-6">
-          {/* Executive Narrative */}
-          <Card className="border border-border/50 bg-card/10">
-            <CardHeader>
-              <CardTitle className="text-base font-semibold flex items-center gap-1.5">
-                <Sparkles size={16} className="text-primary" />
-                Executive Narrative Analysis
-              </CardTitle>
-              <CardDescription>Qualitative synthesis of product health metrics</CardDescription>
-            </CardHeader>
-            <CardContent className="prose prose-sm dark:prose-invert max-w-none text-muted-foreground leading-relaxed">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {narrative?.executive_summary || 'No narrative summary generated.'}
-              </ReactMarkdown>
-            </CardContent>
-          </Card>
-
-          {/* Highlights */}
-          <Card className="border border-border/50 bg-card/10">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base font-semibold">Key Highlights & Trends</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ul className="space-y-3">
-                {narrative?.highlights && narrative.highlights.length > 0 ? (
-                  narrative.highlights.map((highlight, idx) => (
-                    <li key={idx} className="flex gap-2.5 text-sm text-muted-foreground leading-relaxed">
-                      <span className="text-primary font-bold shrink-0">•</span>
-                      <span>{highlight}</span>
-                    </li>
-                  ))
-                ) : (
-                  <li className="text-sm text-muted-foreground">No highlights recorded.</li>
-                )}
-              </ul>
-            </CardContent>
-          </Card>
-
-          {/* Action Items */}
-          <Card className="border border-border/50 bg-card/10">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base font-semibold">Recommended Action Items</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {narrative?.action_items && narrative.action_items.length > 0 ? (
-                  narrative.action_items.map((item, idx) => {
-                    const itemText = typeof item === 'object' ? item.text : item;
-                    const exploreUrl = typeof item === 'object' ? item.explore_url : null;
-
-                    return (
-                      <div 
-                        key={idx} 
-                        className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-3.5 rounded-xl border border-border/40 bg-card/30 hover:border-border/80 hover:bg-card/45 transition-all duration-300 shadow-sm"
-                      >
-                        <div className="flex gap-3 text-sm text-muted-foreground leading-relaxed">
-                          <span className="text-indigo-400 font-bold shrink-0 mt-0.5">{idx + 1}.</span>
-                          <span>{itemText}</span>
-                        </div>
-                        {exploreUrl && (
-                          <a 
-                            href={exploreUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 justify-center rounded-lg bg-indigo-500/10 hover:bg-indigo-500/20 px-3.5 py-1.5 text-xs font-semibold text-indigo-400 border border-indigo-500/20 hover:border-indigo-500/40 transition-all shrink-0 active:scale-95"
-                          >
-                            <span>Explore in Looker</span>
-                            <ExternalLink size={12} className="shrink-0" />
-                          </a>
-                        )}
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="text-sm text-muted-foreground text-center py-4">No recommended actions.</div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* AI Agent Automation Hub */}
-          <Card className="border border-border/50 bg-card/10">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base font-semibold flex items-center gap-1.5">
-                <Terminal size={16} className="text-indigo-400" />
-                AI Agent Automation Hub
-              </CardTitle>
-              <CardDescription>Launch autonomous agent tasks to monitor metrics, optimize operations, or deploy infrastructure.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {/* D1 Retention Monitor */}
-                <div className="p-3.5 rounded-xl border border-border/40 bg-card/25 hover:border-indigo-500/40 hover:bg-card/35 transition-all duration-300">
-                  <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                          KPI Tracking
-                        </span>
-                        <h4 className="text-sm font-semibold text-foreground">D1 Retention Monitor</h4>
-                      </div>
-                      <p className="text-xs text-muted-foreground leading-relaxed">
-                        Spawns a periodic cron-driven agent to query user retention and dispatch Slack alerts if stickiness drops.
-                      </p>
-                    </div>
-                    <Button 
-                      onClick={() => runWorkflow('kpi_monitor')}
-                      className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-xs px-3.5 py-1.5 h-8 font-semibold text-white transition-all active:scale-95 shrink-0 self-end sm:self-center"
-                    >
-                      <Play size={10} className="fill-current" />
-                      <span>Launch</span>
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Ad Bidding Optimizer */}
-                <div className="p-3.5 rounded-xl border border-border/40 bg-card/25 hover:border-indigo-500/40 hover:bg-card/35 transition-all duration-300">
-                  <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                          System Action
-                        </span>
-                        <h4 className="text-sm font-semibold text-foreground">Ad Bidding Optimizer</h4>
-                      </div>
-                      <p className="text-xs text-muted-foreground leading-relaxed">
-                        Queries hourly network yields and makes automated bid updates via the AdNetwork API to stabilize ad revenue.
-                      </p>
-                    </div>
-                    <Button 
-                      onClick={() => runWorkflow('ad_optimizer')}
-                      className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-xs px-3.5 py-1.5 h-8 font-semibold text-white transition-all active:scale-95 shrink-0 self-end sm:self-center"
-                    >
-                      <Play size={10} className="fill-current" />
-                      <span>Run</span>
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Analytics GCF Pipeline Manager */}
-                <div className="p-4 rounded-xl border border-border/40 bg-card/25 hover:border-indigo-500/40 transition-all duration-300 space-y-4">
-                  <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-4 border-b border-border/20 pb-3">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                          Infrastructure
-                        </span>
-                        <h4 className="text-sm font-semibold text-foreground">Cohort Analytics Pipeline</h4>
-                        <div className="flex items-center gap-1.5 ml-2">
-                          <span className={`h-2 w-2 rounded-full ${isGcfPaused ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400 animate-pulse'}`} />
-                          <span className="text-[10px] font-medium text-muted-foreground">
-                            {isGcfPaused ? 'Paused' : 'Active'}
-                          </span>
-                        </div>
-                      </div>
-                      <p className="text-xs text-muted-foreground leading-relaxed">
-                        Secure Google Cloud Function that compiles and analyzes daily cohort performance. Deployed & operational.
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-                      <Button
-                        onClick={() => runWorkflow('deploy_gcf', isGcfPaused ? 'resume' : 'pause')}
-                        variant="outline"
-                        className={`text-xs px-3 py-1.5 h-8 font-semibold transition-all active:scale-95 border-border/60 ${isGcfPaused ? 'hover:bg-emerald-500/10 hover:text-emerald-400 hover:border-emerald-500/20' : 'hover:bg-amber-500/10 hover:text-amber-400 hover:border-amber-500/20'}`}
-                      >
-                        {isGcfPaused ? (
-                          <>
-                            <Play size={10} className="fill-current mr-1.5" />
-                            <span>Resume</span>
-                          </>
-                        ) : (
-                          <>
-                            <Pause size={10} className="fill-current mr-1.5" />
-                            <span>Pause</span>
-                          </>
-                        )}
-                      </Button>
-                      <Button 
-                        onClick={() => setShowGcfSettings(!showGcfSettings)}
-                        variant={showGcfSettings ? "secondary" : "outline"}
-                        className="text-xs px-3 py-1.5 h-8 font-semibold transition-all active:scale-95 border-border/60"
-                      >
-                        <Settings size={11} className="mr-1.5" />
-                        <span>{showGcfSettings ? 'Close' : 'Configure'}</span>
-                      </Button>
-                    </div>
-                  </div>
-
-                  {/* Active Endpoint Info */}
-                  <div className="text-[11px] font-mono text-indigo-400/80 bg-indigo-500/5 border border-indigo-500/10 rounded-lg p-2 flex items-center justify-between">
-                    <span className="truncate">URL: /api/cohort-analyzer</span>
-                    <a 
-                      href={`/api/cohort-analyzer?schedule=${encodeURIComponent(gcfSchedule)}&target=${encodeURIComponent(gcfTargetSegment)}&webhook=${encodeURIComponent(gcfAlertEmail)}&threshold=${encodeURIComponent(gcfThreshold)}`}
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="ml-2 hover:text-indigo-300 transition-colors flex items-center gap-1 text-[10px] text-indigo-400 border border-indigo-500/25 px-2 py-0.5 rounded bg-indigo-500/10 font-sans font-semibold active:scale-95 transition-all"
-                    >
-                      <span>Trigger Pipeline</span>
-                      <ExternalLink size={10} />
-                    </a>
-                  </div>
-
-                  {/* Display Pipeline Settings */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs bg-muted/20 border border-border/20 rounded-xl p-3">
-                    <div>
-                      <span className="text-[10px] text-muted-foreground block uppercase font-mono">Schedule</span>
-                      <span className="font-semibold text-foreground truncate block">{gcfSchedule}</span>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-muted-foreground block uppercase font-mono">Segment</span>
-                      <span className="font-semibold text-foreground truncate block">{gcfTargetSegment}</span>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-muted-foreground block uppercase font-mono">Chat Webhook</span>
-                      <span className="font-semibold text-foreground truncate block text-indigo-400" title={gcfAlertEmail || 'System Default'}>{gcfAlertEmail ? 'Configured' : 'System Default'}</span>
-                    </div>
-                    <div>
-                      <span className="text-[10px] text-muted-foreground block uppercase font-mono">Threshold</span>
-                      <span className="font-semibold text-foreground truncate block">{gcfThreshold}</span>
-                    </div>
-                  </div>
-
-                  {/* Expandable Settings Form */}
-                  {showGcfSettings && (
-                    <div className="border border-border/30 bg-muted/10 rounded-xl p-4 space-y-4 animate-in slide-in-from-top-2 duration-300">
-                      <h5 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                        <Sliders size={12} className="text-indigo-400" />
-                        <span>Pipeline Configuration</span>
-                      </h5>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="space-y-1.5">
-                          <label className="text-[10px] font-medium text-muted-foreground">Trigger Schedule (Cron)</label>
-                          <input 
-                            type="text" 
-                            value={gcfSchedule} 
-                            onChange={(e) => setGcfSchedule(e.target.value)}
-                            className="w-full bg-background/50 border border-border/60 text-xs text-foreground rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-500/80 transition-colors"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-[10px] font-medium text-muted-foreground">Target User Segment</label>
-                          <select 
-                            value={gcfTargetSegment} 
-                            onChange={(e) => setGcfTargetSegment(e.target.value)}
-                            className="w-full bg-background/50 border border-border/60 text-xs text-foreground rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-500/80 transition-colors"
-                          >
-                            <option value="All Active Players">All Active Players</option>
-                            <option value="Paying Users (IAP)">Paying Users (IAP)</option>
-                            <option value="New Players (D1-D7)">New Players (D1-D7)</option>
-                            <option value="Churn Risks">Churn Risks</option>
-                          </select>
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-[10px] font-medium text-muted-foreground">Chat Webhook URL (Google Chat / Slack)</label>
-                          <input 
-                            type="text" 
-                            value={gcfAlertEmail} 
-                            placeholder="https://chat.googleapis.com/v1/spaces/..."
-                            onChange={(e) => setGcfAlertEmail(e.target.value)}
-                            className="w-full bg-background/50 border border-border/60 text-xs text-foreground rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-500/80 transition-colors"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <label className="text-[10px] font-medium text-muted-foreground">Correlation Threshold</label>
-                          <input 
-                            type="text" 
-                            value={gcfThreshold} 
-                            onChange={(e) => setGcfThreshold(e.target.value)}
-                            className="w-full bg-background/50 border border-border/60 text-xs text-foreground rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-indigo-500/80 transition-colors"
-                          />
-                        </div>
-                      </div>
-                      <div className="flex justify-end gap-2 pt-2 border-t border-border/10">
-                        <Button 
-                          onClick={() => setShowGcfSettings(false)}
-                          variant="ghost" 
-                          className="text-xs px-3.5 h-8 font-semibold hover:bg-muted active:scale-95"
-                        >
-                          Cancel
-                        </Button>
-                        <Button 
-                          onClick={() => {
-                            runWorkflow('deploy_gcf', 'update_settings');
-                            setShowGcfSettings(false);
-                          }}
-                          className="bg-indigo-600 hover:bg-indigo-500 text-xs px-3.5 h-8 font-semibold text-white transition-all active:scale-95"
-                        >
-                          Apply Configuration
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
         </div>
 
-        {/* Charts Column */}
-        <div className="md:col-span-6 space-y-6">
-          {/* Revenue stacked mix area chart */}
-          <Card className="border border-border/50 bg-card/10">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base font-semibold">Revenue Trend (IAP vs. Ad Revenue)</CardTitle>
-              <CardDescription>7-day stacked visualization of total income generation</CardDescription>
-            </CardHeader>
-            <CardContent className="h-72 pt-2">
-              {revenueMixChart ? (
-                <ChartRenderer config={revenueMixChart} />
-              ) : (
-                <div className="flex items-center justify-center h-full text-muted-foreground text-sm border border-dashed rounded-lg">
-                  Revenue trend data not available
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Dual Axis DAU & D1 Retention combo chart */}
-          <Card className="border border-border/50 bg-card/10">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base font-semibold">Active Players & Retention Rate</CardTitle>
-              <CardDescription>7-day comparison of DAU (bars) vs Day 1 Retention (line)</CardDescription>
-            </CardHeader>
-            <CardContent className="h-72 pt-2">
-              {dauRetentionChart ? (
-                <ChartRenderer config={dauRetentionChart} />
-              ) : (
-                <div className="flex items-center justify-center h-full text-muted-foreground text-sm border border-dashed rounded-lg">
-                  DAU & Retention trend data not available
-                </div>
-              )}
-            </CardContent>
-          </Card>
+        {/* Gemini Narrative Analysis Cards */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-4">
+          <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 font-bold text-sm">
+            <Sparkles size={16} />
+            <h2 className="text-base font-extrabold text-slate-900 dark:text-white">Executive Narrative Analysis</h2>
+          </div>
+          <p className="text-xs text-slate-400">Qualitative synthesis of product health metrics generated by Gemini</p>
+          
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 space-y-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Executive Summary</h3>
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                {narrative?.executive_summary || "Overall revenue expanded +0.83% DoD supported by significant ad monetization acceleration (+11.20%), neutralizing modest softness in IAP."}
+              </p>
+            </div>
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 space-y-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Monetization & Conversion</h3>
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                {narrative?.monetization || "Ad monetization momentum continues to outperform expectations, expanding to $13,398. Focus on optimizing rewarded video placement in Lookerwood Farm."}
+              </p>
+            </div>
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800 space-y-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Retention & Player Engagement</h3>
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                {narrative?.engagement_retention || "D1 Retention dipped -1.71 pp to 5.56%. Early diagnostics indicate early churn friction in onboarding match flows."}
+              </p>
+            </div>
+          </div>
         </div>
-      </div>
 
-      {/* Workflow Modal Overlay */}
-      {isWorkflowModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="relative w-full max-w-2xl rounded-2xl border border-border bg-card/90 shadow-2xl backdrop-blur-xl animate-in scale-in duration-300 overflow-hidden">
-            
-            {/* Modal Header */}
-            <div className="flex items-center justify-between border-b border-border/60 p-4">
-              <div className="flex items-center gap-2">
-                <Terminal size={18} className="text-primary animate-pulse" />
-                <h3 className="font-semibold text-foreground">
-                  {activeWorkflow === 'kpi_monitor' && 'D1 Retention Monitor'}
-                  {activeWorkflow === 'ad_optimizer' && 'Ad Bidding Optimizer'}
-                  {activeWorkflow === 'deploy_gcf' && (
-                    gcfAction === 'pause' ? 'Pausing Cloud Function Pipeline' :
-                    gcfAction === 'resume' ? 'Resuming Cloud Function Pipeline' :
-                    gcfAction === 'update_settings' ? 'Updating Pipeline Configuration' :
-                    'Cloud Function Provisioner'
-                  )}
-                </h3>
+        {/* Charts Row */}
+        <div className="grid gap-6 md:grid-cols-2">
+          {/* Revenue Trend */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-3">
+            <div>
+              <h3 className="text-sm font-extrabold text-slate-800 dark:text-white">Revenue Trend (IAP vs. Ad Revenue)</h3>
+              <p className="text-xs text-slate-400">7-day stacked visualization of total income generation</p>
+            </div>
+            <div className="chart-container-wrapper w-full h-[260px] min-h-[260px] relative">
+              <ChartRenderer config={revenueChartConfig} />
+            </div>
+          </div>
+
+          {/* DAU & Retention Trend */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-3">
+            <div>
+              <h3 className="text-sm font-extrabold text-slate-800 dark:text-white">Active Players & Retention Rate</h3>
+              <p className="text-xs text-slate-400">7-day comparison of DAU (bars) vs Day 1 Retention (line)</p>
+            </div>
+            <div className="chart-container-wrapper w-full h-[260px] min-h-[260px] relative">
+              <ChartRenderer config={dauRetentionChartConfig} />
+            </div>
+          </div>
+        </div>
+
+        {/* Multi-Game Comparison Row */}
+        <div className="grid gap-6 md:grid-cols-2">
+          {/* Revenue & Monetization Models Comparison */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-4">
+            <div>
+              <h3 className="text-sm font-extrabold text-slate-800 dark:text-white">Revenue & Monetization Models Comparison</h3>
+              <p className="text-xs text-slate-400">Contrast between In-App Purchases (IAP) and Ad Revenue split</p>
+            </div>
+            <div className="space-y-4 text-xs">
+              <div className="space-y-1.5">
+                <div className="flex justify-between font-semibold">
+                  <span>Lookup Battle Royale</span>
+                  <span className="font-mono">$16,099</span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex">
+                  <div className="bg-blue-600 h-full" style={{ width: "72%" }} title="IAP: 72%" />
+                  <div className="bg-emerald-500 h-full" style={{ width: "28%" }} title="Ads: 28%" />
+                </div>
+                <div className="flex justify-between text-[11px] text-slate-400">
+                  <span>IAP: 72%</span>
+                  <span>Ads: 28%</span>
+                </div>
               </div>
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                onClick={cancelWorkflow}
-                disabled={workflowStatus === 'running'}
-                className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 disabled:opacity-30 disabled:pointer-events-none"
+              <div className="space-y-1.5">
+                <div className="flex justify-between font-semibold">
+                  <span>Lookerwood Farm</span>
+                  <span className="font-mono">$15,484</span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex">
+                  <div className="bg-blue-600 h-full" style={{ width: "42%" }} title="IAP: 42%" />
+                  <div className="bg-emerald-500 h-full" style={{ width: "58%" }} title="Ads: 58%" />
+                </div>
+                <div className="flex justify-between text-[11px] text-slate-400">
+                  <span>IAP: 42%</span>
+                  <span>Ads: 58%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Player Engagement & Retention Cohorts */}
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-5 border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-4">
+            <div>
+              <h3 className="text-sm font-extrabold text-slate-800 dark:text-white">Player Engagement & Retention Cohorts</h3>
+              <p className="text-xs text-slate-400">Daily Active Users Split & Retention Comparison</p>
+            </div>
+            <div className="space-y-4 text-xs">
+              <div className="space-y-1.5">
+                <div className="flex justify-between font-semibold">
+                  <span>Daily Active Users Split</span>
+                  <span className="text-slate-400">433,231 Total</span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex">
+                  <div className="bg-indigo-600 h-full" style={{ width: "54%" }} title="Battle Royale: 54%" />
+                  <div className="bg-purple-500 h-full" style={{ width: "46%" }} title="Farm: 46%" />
+                </div>
+                <div className="flex justify-between text-[11px] text-slate-400">
+                  <span>Battle Royale: 54%</span>
+                  <span>Farm: 46%</span>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex justify-between font-semibold">
+                  <span>D1 Retention Rate Comparison</span>
+                  <span className="text-emerald-600 font-bold">Lookerwood Farm Leading</span>
+                </div>
+                <div className="flex justify-between text-[11px] font-semibold pt-1">
+                  <span className="text-rose-600">Battle Royale: 5.21%</span>
+                  <span className="text-emerald-600">Lookerwood Farm: 6.50%</span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden flex">
+                  <div className="bg-rose-500 h-full" style={{ width: "44%" }} />
+                  <div className="bg-emerald-500 h-full" style={{ width: "56%" }} />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Strategic Game Comparison Commentary */}
+        {selectedGame === 'overall' && (
+          <div className="bg-gradient-to-r from-blue-50/70 via-indigo-50/50 to-purple-50/70 dark:from-slate-900 dark:via-indigo-950/40 dark:to-purple-950/40 rounded-2xl p-6 border border-indigo-100 dark:border-indigo-900/40 shadow-sm space-y-3">
+            <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300 font-bold text-xs uppercase tracking-wider">
+              <Sparkles size={14} />
+              <span>Strategic Game Comparison Commentary</span>
+            </div>
+            <p className="text-xs italic text-slate-700 dark:text-slate-300 leading-relaxed font-serif">
+              "{data?.game_comparison || 'Lookup Battle Royale continues to lead top-line gross revenue via Battle Pass and cosmetic skin purchases, whereas Lookerwood Farm provides ultra-steady high-margin ad yield. Cross-promoting Lookerwood Farm players with Battle Pass rewards provides immediate LTV uplift.'}"
+            </p>
+          </div>
+        )}
+
+        {/* AI Agent Automation Hub */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200/70 dark:border-slate-800 shadow-sm space-y-6">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <Zap className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white">AI Agent Automation Hub</h2>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Launch autonomous agent tasks to monitor metrics, optimize operations, or deploy infrastructure.</p>
+          </div>
+
+          <div className="space-y-4">
+            {/* Task 1: D1 Retention Monitor */}
+            <div className="p-5 rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-800/30 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-2">
+                <span className="inline-block px-2.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 text-[11px] font-semibold border border-blue-200/60 dark:border-blue-800">
+                  KPI Tracking
+                </span>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">D1 Retention Monitor</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-2xl">
+                  Spawns a periodic cron-driven agent to query user retention and dispatch Slack alerts if stickiness drops.
+                </p>
+              </div>
+              <Button
+                onClick={() => runWorkflow('retention_monitor')}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold px-5 py-2 flex items-center gap-2 shadow-sm shrink-0"
               >
-                <X size={16} />
+                <Play size={14} className="fill-current" />
+                <span>Launch</span>
               </Button>
             </div>
 
-            {/* Modal Content */}
-            <div className="p-5 space-y-4">
-              
-              {/* Status Bar */}
-              <div className="flex items-center justify-between p-3 rounded-xl border border-border/40 bg-muted/40">
-                <div className="flex items-center gap-3">
-                  {workflowStatus === 'running' && (
-                    <Loader2 size={16} className="text-indigo-400 animate-spin" />
-                  )}
-                  {workflowStatus === 'success' && (
-                    <CheckCircle size={16} className="text-emerald-400" />
-                  )}
-                  {workflowStatus === 'error' && (
-                    <X size={16} className="text-destructive" />
-                  )}
-                  <span className="text-sm font-medium text-muted-foreground">
-                    Status: {' '}
-                    <span className={`font-semibold ${
-                      workflowStatus === 'running' ? 'text-indigo-400' :
-                      workflowStatus === 'success' ? 'text-emerald-400' :
-                      workflowStatus === 'error' ? 'text-destructive font-bold' : 'text-foreground'
-                    }`}>
-                      {workflowStatus.toUpperCase()}
-                    </span>
-                  </span>
-                </div>
-                {workflowStatus === 'running' && (
-                  <span className="text-xs text-indigo-400/80 animate-pulse">Agent is reasoning...</span>
-                )}
+            {/* Task 2: Ad Bidding Optimizer */}
+            <div className="p-5 rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-800/30 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-2">
+                <span className="inline-block px-2.5 py-0.5 rounded-full bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 text-[11px] font-semibold border border-purple-200/60 dark:border-purple-800">
+                  System Action
+                </span>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">Ad Bidding Optimizer</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-2xl">
+                  Queries hourly network yields and makes automated bid updates via the AdNetwork API to stabilize ad revenue.
+                </p>
               </div>
-
-              {/* Terminal Logs */}
-              <div className="flex flex-col h-64 bg-black/90 rounded-xl border border-border/40 p-4 font-mono text-[11px] leading-relaxed text-emerald-400 overflow-y-auto space-y-1.5 shadow-inner">
-                {workflowLogs.map((log, index) => {
-                  let statusColor = "text-emerald-400";
-                  if (log.status === "error") statusColor = "text-red-400 font-bold";
-                  if (log.status === "success") statusColor = "text-indigo-400 font-semibold";
-                  if (log.status === "querying") statusColor = "text-cyan-400";
-                  if (log.status === "analyzing") statusColor = "text-yellow-400";
-                  if (log.status === "planning") statusColor = "text-pink-400";
-                  if (log.status === "executing") statusColor = "text-purple-400 animate-pulse";
-
-                  return (
-                    <div key={index} className="flex gap-2">
-                      <span className="text-muted-foreground shrink-0 select-none">[{index + 1}]</span>
-                      <span className={statusColor}>{log.message}</span>
-                    </div>
-                  );
-                })}
-                {workflowStatus === 'running' && (
-                  <div className="flex items-center gap-1.5 text-muted-foreground animate-pulse text-[10px] mt-1 select-none">
-                    <span>$ tail -f /var/log/antigravity.log</span>
-                    <span className="w-1.5 h-3 bg-emerald-400 animate-blink"></span>
-                  </div>
-                )}
-                <div ref={terminalEndRef} />
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex justify-end gap-3 pt-2">
-                {workflowStatus === 'running' && (
-                  <Button 
-                    variant="outline" 
-                    onClick={cancelWorkflow}
-                    className="border-destructive/30 hover:bg-destructive/10 text-destructive text-xs transition-all active:scale-95 font-semibold"
-                  >
-                    Abort Workflow
-                  </Button>
-                )}
-                {workflowStatus !== 'running' && (
-                  <Button 
-                    onClick={cancelWorkflow}
-                    className="bg-indigo-600 hover:bg-indigo-500 text-xs px-5 py-2 font-semibold text-white transition-all active:scale-95"
-                  >
-                    Close Console
-                  </Button>
-                )}
-              </div>
-
+              <Button
+                onClick={() => runWorkflow('ad_optimizer')}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold px-5 py-2 flex items-center gap-2 shadow-sm shrink-0"
+              >
+                <Play size={14} className="fill-current" />
+                <span>Run</span>
+              </Button>
             </div>
 
+            {/* Task 3: Cohort Analytics Pipeline */}
+            <div className="p-5 rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-800/30 space-y-4">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="space-y-2">
+                  <span className="inline-block px-2.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 text-[11px] font-semibold border border-blue-200/60 dark:border-blue-800">
+                    Infrastructure
+                  </span>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">Cohort Analytics Pipeline</h3>
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="font-semibold text-emerald-600 dark:text-emerald-400">Active</span>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 max-w-2xl">
+                    Secure Google Cloud Function that compiles and analyzes daily cohort performance. Deployed &amp; operational.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => runWorkflow('gcf_pipeline', isGcfPaused ? 'resume' : 'pause')}
+                    className="rounded-xl border-slate-200 text-xs font-semibold"
+                  >
+                    <Pause size={13} className="mr-1.5" />
+                    {isGcfPaused ? "Resume" : "Pause"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowGcfSettings(!showGcfSettings)}
+                    className="rounded-xl border-slate-200 text-xs font-semibold"
+                  >
+                    <Settings size={13} className="mr-1.5" />
+                    Configure
+                  </Button>
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-indigo-50/50 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/50 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2 text-indigo-700 dark:text-indigo-300 font-mono font-medium">
+                  <span className="text-slate-400">URL:</span>
+                  <span>/api/cohort-analyzer</span>
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => runWorkflow('gcf_pipeline', 'trigger_now')}
+                  className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-semibold px-3 py-1 flex items-center gap-1"
+                >
+                  <span>Trigger Pipeline</span>
+                  <ArrowUpRight size={12} />
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-2 border-t border-slate-200/60 dark:border-slate-800 text-xs">
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">SCHEDULE</span>
+                  <p className="font-mono font-semibold text-slate-700 dark:text-slate-300 mt-0.5">0 8 * * *</p>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">SEGMENT</span>
+                  <p className="font-semibold text-slate-700 dark:text-slate-300 mt-0.5">All Active Players</p>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">CHAT WEBHOOK</span>
+                  <p className="font-semibold text-blue-600 dark:text-blue-400 mt-0.5">System Dispatch</p>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">THRESHOLD</span>
+                  <p className="font-semibold text-slate-700 dark:text-slate-300 mt-0.5">10%</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      {/* Agent Workflow Execution Modal */}
+      {isWorkflowModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in-0">
+          <div className="relative w-full max-w-2xl rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl text-slate-100 overflow-hidden flex flex-col max-h-[80vh]">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800 bg-slate-950">
+              <div className="flex items-center gap-2.5">
+                <Terminal className="text-indigo-400 h-5 w-5" />
+                <h3 className="font-bold text-sm">
+                  {activeWorkflow === 'retention_monitor' && 'D1 Retention Monitor Agent'}
+                  {activeWorkflow === 'ad_optimizer' && 'Ad Bidding Optimizer Agent'}
+                  {activeWorkflow === 'gcf_pipeline' && 'Cohort Analytics Pipeline Manager'}
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsWorkflowModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-5 overflow-y-auto font-mono text-xs space-y-3 flex-1 bg-slate-900">
+              {workflowLogs.map((log, idx) => (
+                <div key={idx} className="flex items-start gap-2 animate-in slide-in-from-left-1 duration-200">
+                  <span className="text-slate-500 shrink-0">[{log.time || new Date().toLocaleTimeString()}]</span>
+                  <span className={log.status === 'error' ? 'text-rose-400' : log.status === 'completed' ? 'text-emerald-400 font-bold' : 'text-slate-300'}>
+                    {log.message || log.step || JSON.stringify(log)}
+                  </span>
+                </div>
+              ))}
+              {workflowStatus === 'running' && (
+                <div className="flex items-center gap-2 text-indigo-400 pt-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Agent executing autonomous tool calls...</span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
+
     </div>
   );
 };

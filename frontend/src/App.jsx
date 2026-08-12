@@ -1634,73 +1634,68 @@ function App() {
   const currentDashboard = datasetConfig.dashboards.find(d => d.id === activeDashboard);
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background">
-      {/* Navigation Rail */}
+    <div className="flex flex-col h-screen w-full overflow-hidden bg-[#f4f6fb] dark:bg-slate-950 font-sans">
+      <header className="w-full flex items-center justify-between border-b border-slate-200/80 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md px-6 py-3 shrink-0 shadow-sm z-10">
+        <div className="flex items-center gap-3">
+          <div className="p-1.5 rounded-xl bg-blue-600 text-white shadow-sm flex items-center justify-center">
+            <Sparkles size={18} />
+          </div>
+          <span className="text-base font-extrabold text-slate-800 dark:text-white tracking-tight">Gaming Analytics</span>
 
-
-      {/* Main Workspace */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex items-center justify-between border-b glass px-6 py-4">
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-primary/10 p-2">
-              <Bot className="text-primary h-6 w-6" />
-            </div>
-            <span className="text-lg font-semibold text-foreground whitespace-nowrap">Gaming Analytics</span>
-
-            {/* Dashboard Selection Dropdown */}
-            <div className="relative ml-4">
-              <select
-                value={activeDashboard}
-                onChange={(e) => setActiveDashboard(e.target.value)}
-                className="appearance-none h-10 min-w-[200px] cursor-pointer rounded-md border border-input bg-background pl-3 pr-8 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-              >
-                {datasetConfig.dashboards.map((dash) => (
-                  <option key={dash.id} value={dash.id}>
-                    {dash.title}
-                  </option>
-                ))}
-              </select>
-              <div style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-secondary)' }}>
-                <ChevronDown size={14} />
-              </div>
+          {/* Dashboard Selection Dropdown */}
+          <div className="relative ml-4">
+            <select
+              value={activeDashboard}
+              onChange={(e) => setActiveDashboard(e.target.value)}
+              className="appearance-none h-9 min-w-[210px] cursor-pointer rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 pl-3.5 pr-8 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm"
+            >
+              {datasetConfig.dashboards.map((dash) => (
+                <option key={dash.id} value={dash.id}>
+                  {dash.title}
+                </option>
+              ))}
+            </select>
+            <div style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#94a3b8' }}>
+              <ChevronDown size={14} />
             </div>
           </div>
+        </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-            <Button
-              variant="default"
-              size="sm"
-              onClick={() => setIsInfoModalOpen(true)}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white"
-            >
-              <Info size={16} />
-              <span>Agent Info</span>
-            </Button>
-            <button
-              onClick={logout}
-              title="Logout"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                background: 'transparent',
-                border: '1px solid var(--border-color)',
-                padding: '8px 16px',
-                borderRadius: '8px',
-                color: 'var(--text-secondary)',
-                cursor: 'pointer',
-                fontSize: '0.9rem'
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-tertiary)'; e.currentTarget.style.color = 'var(--text-primary)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
-            >
-              <LogOut size={16} />
-              <span>Log Out</span>
-            </button>
-          </div>
-        </header>
+        <div className="flex items-center gap-3">
+          <Button
+            variant={isSidebarOpen ? "default" : "outline"}
+            size="sm"
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            className={`flex items-center gap-2 text-xs font-semibold rounded-xl transition-all ${
+              isSidebarOpen 
+                ? "bg-blue-600 text-white shadow-sm" 
+                : "border-slate-200 text-slate-700 hover:bg-slate-100"
+            }`}
+          >
+            <Bot size={15} />
+            <span>{isSidebarOpen ? "Close Agent" : "Agent Assistant"}</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsInfoModalOpen(true)}
+            className="rounded-xl border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-semibold flex items-center gap-1.5"
+          >
+            <Info size={14} />
+            <span>Info</span>
+          </Button>
+          <button
+            onClick={logout}
+            title="Logout"
+            className="p-1.5 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
+          >
+            <LogOut size={16} />
+          </button>
+        </div>
+      </header>
 
-        <section className="workspace-content" style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column' }}>
+      <div className="flex flex-1 overflow-hidden relative">
+        <section className="workspace-content my-3 ml-3 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-md flex-1 overflow-hidden relative flex flex-col">
           {/* Overlay to catch mouse events during resize */}
           {isResizing && <div className="resize-overlay" style={{
             position: 'absolute', inset: 0, zIndex: 9999, background: 'transparent'
@@ -1781,7 +1776,6 @@ function App() {
             </button>
           )}
         </section>
-      </div >
 
       {/* Resizer Handle */}
       {
@@ -2142,8 +2136,9 @@ function App() {
         </footer>
 
       </aside>
+      </div>
       <AgentInfoModal isOpen={isInfoModalOpen} onClose={() => setIsInfoModalOpen(false)} />
-    </div >
+    </div>
   )
 }
 
