@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useGoogleLogin } from '@react-oauth/google'
-import { Send, Bot, User, Loader2, Code, X, ExternalLink, ChevronDown, ChevronUp, Info, AlertTriangle, LayoutDashboard, MessageSquare, Menu, ChevronRight, Maximize2, Minimize2, LogOut, Zap, Brain, RefreshCw, Square, Sparkles, Trash2 } from 'lucide-react'
+import { Send, Bot, User, Loader2, Code, X, ExternalLink, ChevronDown, ChevronUp, Info, AlertTriangle, LayoutDashboard, MessageSquare, Menu, ChevronRight, Maximize2, Minimize2, LogOut, Zap, Brain, RefreshCw, Square, Sparkles, Trash2, ShieldCheck, BarChart3 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import JSON5 from 'json5'
@@ -21,6 +21,7 @@ import VegaChartRenderer from '@/components/VegaChartRenderer';
 import GraphRenderer from '@/components/GraphRenderer';
 import ChartRenderer from '@/components/ChartRenderer';
 import AiSummaryDashboard from '@/components/AiSummaryDashboard';
+import PlayerSafetyDashboard from '@/components/PlayerSafetyDashboard';
 
 ChartJS.register(
   CategoryScale,
@@ -712,7 +713,7 @@ function App() {
   // Fetch Embed Session when dashboard or token changes
   useEffect(() => {
     const fetchEmbedSession = async () => {
-      if (!activeDashboard || !accessToken || activeDashboard === 'ai_summary') return;
+      if (!activeDashboard || !accessToken || activeDashboard === 'ai_summary' || activeDashboard === 'toxicity_safety' || activeDashboard === 'embedded_explore') return;
 
       const dashboard = datasetConfig.dashboards.find(d => d.id === activeDashboard);
       if (!dashboard) return;
@@ -820,9 +821,8 @@ function App() {
     // Optimistically set signedUrl to trigger iframe reload or just use the url if signing isn't needed/fails
     setEmbedError(null);
     setSignedUrl(null); // Force reload
+    setActiveDashboard('embedded_explore');
 
-    // We can assume the iframe will handle it, but since we are replacing the dashboard,
-    // let's try to sign it first to be safe, similar to how fetchSignedUrl works.
     console.log('Handling Looker Link Click:', url);
 
     try {
@@ -1740,6 +1740,10 @@ function App() {
             ) : activeDashboard === 'ai_summary' ? (
               <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, overflowY: 'auto' }}>
                 <AiSummaryDashboard />
+              </div>
+            ) : activeDashboard === 'toxicity_safety' ? (
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, overflowY: 'auto' }}>
+                <PlayerSafetyDashboard />
               </div>
             ) : activeDashboard === 'chat' ? (
               /* Chat is now sidebar only, this view might be deprecated or used for full-screen chat. 

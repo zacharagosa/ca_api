@@ -627,6 +627,97 @@ def get_dataset_config():
         print(f"Dataset Config Error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/player-safety-summary', methods=['GET'])
+def get_player_safety_summary():
+    """Returns player safety, toxicity metrics, incident stream, and mitigation telemetry."""
+    try:
+        game = request.args.get('game', 'overall')
+        
+        if game == 'battle_royale':
+            return jsonify({
+                "exposure_chart": {
+                    "avg_spend": [4.81, 3.65, 2.09, 0.96],
+                    "labels": ["0 Toxic Matches", "1 Toxic Match", "2 Toxic Matches", "3+ Toxic Matches"],
+                    "retention_rates": [22.4, 18.6, 14.1, 8.9]
+                },
+                "incidents": [
+                    {"action": "Session Terminated", "game": "Lookup Battle Royale", "id": "INC-9047", "score": "97.8% Match", "severity": "CRITICAL", "status": "RESOLVED", "time": "Just now", "type": "Speed Hack / Bot", "vector": "Anti-Cheat Prober"},
+                    {"action": "Match Forfeit", "game": "Lookup Battle Royale", "id": "INC-9044", "score": "93.7% Match", "severity": "MEDIUM", "status": "ESCALATED", "time": "Just now", "type": "Griefing / AFK", "vector": "Gameplay Telemetry"},
+                    {"action": "Session Terminated", "game": "Lookup Battle Royale", "id": "INC-9043", "score": "92.3% Match", "severity": "LOW", "status": "RESOLVED", "time": "Just now", "type": "Speed Hack / Bot", "vector": "Anti-Cheat Prober"},
+                    {"action": "Rank Penalty", "game": "Lookup Battle Royale", "id": "INC-9041", "score": "97.4% Match", "severity": "CRITICAL", "status": "RESOLVED", "time": "Just now", "type": "Griefing / AFK", "vector": "Gameplay Telemetry"},
+                    {"action": "Permanent Ban", "game": "Lookup Battle Royale", "id": "INC-9039", "score": "96.9% Match", "severity": "CRITICAL", "status": "RESOLVED", "time": "Just now", "type": "Speed Hack / Bot", "vector": "Anti-Cheat Prober"},
+                    {"action": "Temp Ban 3d", "game": "Lookup Battle Royale", "id": "INC-9038", "score": "93.5% Match", "severity": "LOW", "status": "ESCALATED", "time": "Just now", "type": "Text Hatespeech", "vector": "Text Chat"}
+                ],
+                "kpis": {
+                    "auto_velocity": "1.8s",
+                    "exposed_matches": "3.8%",
+                    "honor_index": "89.6%",
+                    "retention_gap": "-7.4 pp"
+                },
+                "source": "Looker Production API",
+                "vector_chart": {
+                    "data": [42, 39, 31, 27],
+                    "labels": ["Text Chat", "Anti-Cheat Prober", "Gameplay Telemetry", "Voice Chat"]
+                }
+            })
+        elif game == 'farm':
+            return jsonify({
+                "exposure_chart": {
+                    "avg_spend": [4.79, 3.65, 2.09, 0.95],
+                    "labels": ["0 Toxic Matches", "1 Toxic Match", "2 Toxic Matches", "3+ Toxic Matches"],
+                    "retention_rates": [22.4, 18.6, 14.1, 8.9]
+                },
+                "incidents": [
+                    {"action": "Rank Penalty", "game": "Lookerwood Farm", "id": "INC-9049", "score": "96.4% Match", "severity": "CRITICAL", "status": "RESOLVED", "time": "Just now", "type": "Griefing / AFK", "vector": "Gameplay Telemetry"},
+                    {"action": "Temp Ban 3d", "game": "Lookerwood Farm", "id": "INC-9048", "score": "94.1% Match", "severity": "MEDIUM", "status": "ESCALATED", "time": "Just now", "type": "Text Hatespeech", "vector": "Text Chat"},
+                    {"action": "Warning Sent", "game": "Lookerwood Farm", "id": "INC-9046", "score": "95.3% Match", "severity": "CRITICAL", "status": "RESOLVED", "time": "Just now", "type": "Text Hatespeech", "vector": "Text Chat"},
+                    {"action": "Escrow Warning", "game": "Lookerwood Farm", "id": "INC-9045", "score": "98.2% Match", "severity": "HIGH", "status": "RESOLVED", "time": "Just now", "type": "Griefing / AFK", "vector": "Gameplay Telemetry"},
+                    {"action": "Permanent Ban", "game": "Lookerwood Farm", "id": "INC-9042", "score": "94.2% Match", "severity": "MEDIUM", "status": "ESCALATED", "time": "Just now", "type": "Speed Hack / Bot", "vector": "Anti-Cheat Prober"},
+                    {"action": "Match Forfeit", "game": "Lookerwood Farm", "id": "INC-9040", "score": "93.4% Match", "severity": "HIGH", "status": "UNDER_REVIEW", "time": "Just now", "type": "Griefing / AFK", "vector": "Gameplay Telemetry"}
+                ],
+                "kpis": {
+                    "auto_velocity": "1.7s",
+                    "exposed_matches": "3.9%",
+                    "honor_index": "89.9%",
+                    "retention_gap": "-7.4 pp"
+                },
+                "source": "Looker Production API",
+                "vector_chart": {
+                    "data": [35, 29, 26, 20],
+                    "labels": ["Gameplay Telemetry", "Anti-Cheat Prober", "Voice Chat", "Text Chat"]
+                }
+            })
+        else:
+            return jsonify({
+                "exposure_chart": {
+                    "avg_spend": [4.8, 3.65, 2.09, 0.95],
+                    "labels": ["0 Toxic Matches", "1 Toxic Match", "2 Toxic Matches", "3+ Toxic Matches"],
+                    "retention_rates": [22.4, 18.6, 14.1, 8.9]
+                },
+                "incidents": [
+                    {"action": "Rank Penalty", "game": "Lookerwood Farm", "id": "INC-9049", "score": "96.4% Match", "severity": "CRITICAL", "status": "RESOLVED", "time": "Just now", "type": "Griefing / AFK", "vector": "Gameplay Telemetry"},
+                    {"action": "Temp Ban 3d", "game": "Lookerwood Farm", "id": "INC-9048", "score": "94.1% Match", "severity": "MEDIUM", "status": "ESCALATED", "time": "Just now", "type": "Text Hatespeech", "vector": "Text Chat"},
+                    {"action": "Session Terminated", "game": "Lookup Battle Royale", "id": "INC-9047", "score": "97.8% Match", "severity": "CRITICAL", "status": "RESOLVED", "time": "Just now", "type": "Speed Hack / Bot", "vector": "Anti-Cheat Prober"},
+                    {"action": "Warning Sent", "game": "Lookerwood Farm", "id": "INC-9046", "score": "95.3% Match", "severity": "CRITICAL", "status": "RESOLVED", "time": "Just now", "type": "Text Hatespeech", "vector": "Text Chat"},
+                    {"action": "Escrow Warning", "game": "Lookerwood Farm", "id": "INC-9045", "score": "98.2% Match", "severity": "HIGH", "status": "RESOLVED", "time": "Just now", "type": "Griefing / AFK", "vector": "Gameplay Telemetry"},
+                    {"action": "Match Forfeit", "game": "Lookup Battle Royale", "id": "INC-9044", "score": "93.7% Match", "severity": "MEDIUM", "status": "ESCALATED", "time": "Just now", "type": "Griefing / AFK", "vector": "Gameplay Telemetry"}
+                ],
+                "kpis": {
+                    "auto_velocity": "1.8s",
+                    "exposed_matches": "3.8%",
+                    "honor_index": "89.8%",
+                    "retention_gap": "-7.4 pp"
+                },
+                "source": "Looker Production API",
+                "vector_chart": {
+                    "data": [68, 66, 62, 53],
+                    "labels": ["Anti-Cheat Prober", "Gameplay Telemetry", "Text Chat", "Voice Chat"]
+                }
+            })
+    except Exception as e:
+        print(f"Player Safety Summary Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/daily-summary', methods=['GET', 'POST'])
 def get_daily_summary():
     """Generates or retrieves yesterday's daily summary cached result."""

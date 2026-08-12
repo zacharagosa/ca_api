@@ -143,16 +143,20 @@ starter_questions:
 
 # Test scenarios for the Scenarios dropdown
 test_scenarios:
+  - label: "Toxicity Retention Gap"
+    question: "How does exposure to toxic matches impact player Day 1 retention and 7-day LTV spending?"
+  - label: "Voice Chat Harassment"
+    question: "What is the breakdown of reported toxicity harm vectors across voice chat, text chat, and griefing?"
+  - label: "Auto-Mute Precision"
+    question: "What is the resolution velocity and precision rate of automated voice toxicity mutes?"
+  - label: "D1 Retention Trend"
+    question: "Show me Day 1 Retention Rate for the last 30 days broken down by game name."
+  - label: "IAP vs Ad Split"
+    question: "What is the daily breakdown of IAP revenue vs Ad revenue for Lookerwood Farm over the last 14 days?"
+  - label: "Top Purchasing Countries"
+    question: "List top 5 countries by total In-App Purchase revenue for Lookup Battle Royale."
   - label: "Cohort Analysis"
     question: "Show me weekly retention rates for the last 12 weeks. Visualized as a line chart."
-  - label: "Segmentation by OS"
-    question: "Compare average session duration between iOS and Android users for the top 5 countries by revenue."
-  - label: "Funnel Analysis"
-    question: "Visualize the count of distinct users by event name for the last 7 days, excluding 'session_start'."
-  - label: "Revenue Trends"
-    question: "Identify the top 3 revenue-generating events and their daily trend over the last month."
-  - label: "User Acquisition ROI"
-    question: "Calculate total revenue and count of new users by Traffic Source for the last quarter."
   - label: "Friends Graph"
     question: "Visualize the friends of 'BlueGhost11'"
   - label: "Clan Graph"
@@ -164,6 +168,10 @@ dashboards:
     title: "AI Daily Insights"
     url: "local_dashboard"
     icon: Sparkles
+  - id: toxicity_safety
+    title: "Player Safety & Anti-Toxicity"
+    url: "local_safety_dashboard"
+    icon: ShieldCheck
   - id: overview
     title: "Game Overview"
     url: "/embed/dashboards/s7T18I2e8fSSqkD0y8E31C"
@@ -176,6 +184,10 @@ dashboards:
     title: "Game Monetization"
     url: "/embed/dashboards/dXqsKbYW2Bo3J4HO1yUUd3"
     icon: Activity
+  - id: embedded_explore
+    title: "Looker Explore Inspector"
+    url: "embedded_explore"
+    icon: ExternalLink
   - id: gemini
     title: "Gemini Storyteller"
     url: "/embed/dashboards/WLbhqbfoeSk60lj3jZDsh1"
