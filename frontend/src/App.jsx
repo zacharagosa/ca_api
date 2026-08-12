@@ -500,8 +500,6 @@ function App() {
   const messagesEndRef = useRef(null)
   // Generate a unique session ID when the component mounts
   const [sessionId, setSessionId] = useState(() => 'session_' + Math.random().toString(36).substr(2, 9))
-  const [isAutoTesting, setIsAutoTesting] = useState(false)
-  const autoTestIntervalRef = useRef(null)
 
   // State for Deep Test Suite
   const [isTestModalOpen, setIsTestModalOpen] = useState(false);
@@ -1440,48 +1438,6 @@ function App() {
     }
   }
 
-  // Effect to manage auto-test loop
-  useEffect(() => {
-    if (!isAutoTesting) return;
-
-    let currentIndex = 0;
-
-    const runNext = async () => {
-      // Use test_scenarios instead of starter_questions
-      const scenarios = datasetConfig.test_scenarios || [];
-
-      if (currentIndex >= scenarios.length || !isAutoTesting) {
-        setIsAutoTesting(false);
-        return;
-      }
-
-      // test_scenarios items are objects { label, question }, starter_questions are strings
-      const item = scenarios[currentIndex];
-      const question = typeof item === 'string' ? item : item.question;
-
-      setInput(question);
-
-      // Wait a bit to show the question in the input
-      await new Promise(r => setTimeout(r, 1000));
-
-      // Submit
-      await handleSubmit(null, question);
-
-      // Wait a bit before next question
-      await new Promise(r => setTimeout(r, 2000));
-
-      currentIndex++;
-      if (isAutoTesting) runNext();
-    };
-
-    runNext();
-
-    return () => {
-      // Cleanup if component unmounts or auto-test stops
-      setIsAutoTesting(false);
-    };
-  }, [isAutoTesting]); // Dependency on isAutoTesting state
-
   const handleReauth = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/reauth`, { method: 'POST' })
@@ -1790,31 +1746,26 @@ function App() {
       {/* Assistant Sidebar */}
       <aside
         ref={sidebarRef}
-        className={`flex flex-col border-l glass transition-all duration-300 ${isSidebarOpen ? '' : 'w-0 opacity-0 overflow-hidden'}`}
+        className={`my-3 mr-3 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-md flex flex-col transition-all duration-300 overflow-hidden shrink-0 ${isSidebarOpen ? '' : 'w-0 opacity-0 border-0 my-0 mr-0'}`}
         style={{ width: isSidebarOpen ? sidebarWidth : 0 }}
       >
-        <header className="flex items-center justify-between border-b px-4 py-3">
+        <header className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-4 py-3 bg-slate-50/70 dark:bg-slate-900/70 shrink-0">
           <div className="flex items-center gap-2">
-            <h3 className="flex items-center gap-2 text-sm font-semibold">
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 2A10 10 0 0 0 2 12" stroke="#EA4335" strokeWidth="4" />
-                <path d="M12 2A10 10 0 0 1 22 12" stroke="#4285F4" strokeWidth="4" />
-                <path d="M22 12A10 10 0 0 1 12 22" stroke="#34A853" strokeWidth="4" />
-                <path d="M12 22A10 10 0 0 1 2 12" stroke="#FBBC04" strokeWidth="4" />
-              </svg>
-              <span>Agent</span>
-            </h3>
+            <div className="p-1 rounded-lg bg-blue-600 text-white shadow-sm">
+              <Bot size={16} />
+            </div>
+            <h3 className="text-xs font-extrabold text-slate-800 dark:text-white tracking-tight">AI Analytics Assistant</h3>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             {/* New Chat Button */}
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 text-muted-foreground hover:text-foreground"
+              className="h-7 w-7 text-slate-500 hover:text-slate-900"
               onClick={startNewChat}
               title="New Chat"
             >
-              <MessageSquare className="h-4 w-4" />
+              <MessageSquare className="h-3.5 w-3.5" />
               <span className="sr-only">New Chat</span>
             </Button>
 
@@ -1823,44 +1774,44 @@ function App() {
               <Button
                 variant="ghost"
                 size="icon"
-                className={`h-8 w-8 text-muted-foreground hover:text-foreground ${isHistoryMenuOpen ? 'bg-muted' : ''}`}
+                className={`h-7 w-7 text-slate-500 hover:text-slate-900 ${isHistoryMenuOpen ? 'bg-slate-100' : ''}`}
                 onClick={() => setIsHistoryMenuOpen(!isHistoryMenuOpen)}
                 title="History"
               >
-                <div style={{ transform: 'rotate(0deg)' }}>
-                  {/* Clock Icon can be imported or SVG */}
-                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-                </div>
+                <Clock className="h-3.5 w-3.5" />
               </Button>
 
               {isHistoryMenuOpen && (
-                <div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-md border bg-popover shadow-md animate-in fade-in zoom-in-95 max-h-[400px] overflow-y-auto">
-                  <div className="px-3 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider border-b sticky top-0 bg-popover">
+                <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-xl border border-slate-200 bg-white dark:bg-slate-900 shadow-lg animate-in fade-in zoom-in-95 max-h-[400px] overflow-y-auto p-1">
+                  <div className="px-3 py-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-100 dark:border-slate-800">
                     Recent Conversations
                   </div>
                   {history.length === 0 ? (
-                    <div className="p-4 text-center text-xs text-muted-foreground">No history found</div>
+                    <div className="p-4 text-center text-xs text-slate-400">No history found</div>
                   ) : (
                     history.map((item) => (
                       <div
                         key={item.id}
-                        className={`group flex items-center w-full hover:bg-muted transition-colors border-b border-muted/20 ${sessionId === item.id ? 'bg-muted/50' : ''}`}
+                        className={`group flex items-center w-full rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors ${sessionId === item.id ? 'bg-slate-100/70 font-semibold' : ''}`}
                       >
                         <button
                           className="flex-1 px-3 py-2 text-left text-xs"
-                          onClick={() => loadSession(item.id)}
+                          onClick={() => {
+                            loadSession(item.id);
+                            setIsHistoryMenuOpen(false);
+                          }}
                         >
-                          <div className={`line-clamp-1 ${sessionId === item.id ? 'font-medium' : ''}`}>{item.title || "Untitled Conversation"}</div>
-                          <div className="text-[10px] text-muted-foreground mt-0.5">
-                            {new Date(item.updated_at).toLocaleDateString()} {new Date(item.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          <div className="line-clamp-1">{item.title || "Untitled Conversation"}</div>
+                          <div className="text-[10px] text-slate-400 mt-0.5">
+                            {new Date(item.updated_at).toLocaleDateString()}
                           </div>
                         </button>
                         <button
-                          className="p-2 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                          className="p-1.5 text-slate-400 hover:text-rose-600 opacity-0 group-hover:opacity-100 transition-opacity"
                           onClick={(e) => deleteSession(e, item.id)}
                           title="Delete Conversation"
                         >
-                          <Trash2 size={14} />
+                          <Trash2 size={13} />
                         </button>
                       </div>
                     ))
@@ -1869,48 +1820,37 @@ function App() {
               )}
             </div>
 
-            <div className="h-4 w-px bg-border mx-1" />
             {/* Test Controls - Scenarios Dropdown */}
-            <div className="relative">
-              <div className="relative">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setIsTestMenuOpen(!isTestMenuOpen)}
-                  className="h-8 gap-1 text-xs"
-                >
-                  Scenarios <ChevronDown className="h-3 w-3 opacity-50" />
-                </Button>
-                {isTestMenuOpen && (
-                  <div className="absolute right-0 top-full z-50 mt-1 w-48 rounded-md border bg-popover shadow-md animate-in fade-in zoom-in-95">
-                    <div className="px-3 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider border-b">
-                      TEST SCENARIOS
-                    </div>
-                    {datasetConfig.test_scenarios.map((item, i) => (
-                      <button
-                        key={i}
-                        className="w-full px-3 py-2 text-left text-xs hover:bg-muted focus:bg-muted transition-colors"
-                        onClick={() => runScenario(item.question)}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
+            <div className="relative ml-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsTestMenuOpen(!isTestMenuOpen)}
+                className="h-7 px-2.5 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 rounded-lg flex items-center gap-1 border border-slate-200/60 dark:border-slate-800"
+              >
+                <span>Scenarios</span>
+                <ChevronDown className="h-3 w-3 opacity-50" />
+              </Button>
+              {isTestMenuOpen && (
+                <div className="absolute right-0 top-full z-50 mt-1 w-56 rounded-xl border border-slate-200 bg-white dark:bg-slate-900 shadow-xl p-1 animate-in fade-in zoom-in-95 max-h-[350px] overflow-y-auto">
+                  <div className="px-3 py-1.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-100 dark:border-slate-800">
+                    PRE-BUILT ANALYTICAL SCENARIOS
                   </div>
-                )}
-              </div>
+                  {datasetConfig.test_scenarios.map((item, i) => (
+                    <button
+                      key={i}
+                      className="w-full px-3 py-2 text-left text-xs rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-700 dark:text-slate-200 font-medium"
+                      onClick={() => {
+                        runScenario(item.question);
+                        setIsTestMenuOpen(false);
+                      }}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
-
-            <Button
-              variant={isAutoTesting ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => setIsAutoTesting(!isAutoTesting)}
-              className="h-8 gap-1 text-xs"
-              title={isAutoTesting ? "Stop Auto Test" : "Start Auto Test"}
-            >
-              <LayoutDashboard size={14} />
-              <span>{isAutoTesting ? "Stop" : "Auto Test"}</span>
-            </Button>
-
 
           </div>
         </header>
@@ -2073,44 +2013,49 @@ function App() {
           <div ref={messagesEndRef} />
         </div>
 
-        <footer className="border-t glass p-4 flex flex-col gap-2">
-          {/* Agent Mode Toggle */}
-          <div className="flex justify-center gap-1 mb-2 items-center">
+        <footer className="border-t border-slate-100 dark:border-slate-800 p-3.5 flex flex-col gap-2 bg-white dark:bg-slate-900 shrink-0">
+          <div className="flex justify-center gap-1.5 mb-1 items-center">
             <Button
               variant="outline"
               size="icon"
               onClick={() => setIsInfoModalOpen(true)}
-              className="h-7 w-7 mr-2 shrink-0"
+              className="h-7 w-7 mr-1 shrink-0 rounded-full border-slate-200"
               title="Agent Info"
             >
-              <Info size={14} />
+              <Info size={13} />
             </Button>
             <Button
               variant={agentType === 'fast' ? "default" : "secondary"}
               size="sm"
               onClick={() => setAgentType('fast')}
-              className="h-7 text-xs px-3"
+              className={`h-7 text-xs px-3 rounded-full font-semibold ${
+                agentType === 'fast' ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+              }`}
               title="Fast Mode - Quick answers"
             >
-              <Zap size={12} className="mr-1.5" /> Fast
+              <Zap size={12} className="mr-1" /> Fast
             </Button>
             <Button
               variant={agentType === 'deep' ? "default" : "secondary"}
               size="sm"
               onClick={() => setAgentType('deep')}
-              className="h-7 text-xs px-3"
+              className={`h-7 text-xs px-3 rounded-full font-semibold ${
+                agentType === 'deep' ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+              }`}
               title="Deep Analysis Mode"
             >
-              <Brain size={12} className="mr-1.5" /> Deep
+              <Brain size={12} className="mr-1" /> Deep
             </Button>
             <Button
               variant={agentType === 'mcp' ? "default" : "secondary"}
               size="sm"
               onClick={() => setAgentType('mcp')}
-              className="h-7 text-xs px-3"
+              className={`h-7 text-xs px-3 rounded-full font-semibold ${
+                agentType === 'mcp' ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+              }`}
               title="MCP Mode"
             >
-              <Code size={12} className="mr-1.5" /> MCP
+              <Code size={12} className="mr-1" /> MCP
             </Button>
           </div>
           <div className="flex w-full items-center space-x-2">
@@ -2121,16 +2066,17 @@ function App() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSubmit(e)}
               disabled={isLoading}
-              className="flex-1"
+              className="flex-1 rounded-full bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 px-4 text-xs h-9 focus-visible:ring-blue-500"
             />
             <Button
               type={isLoading ? "button" : "submit"}
               onClick={isLoading ? handleStop : handleSubmit}
               disabled={!input.trim() && !isLoading}
               size="icon"
+              className="h-9 w-9 rounded-full bg-blue-600 hover:bg-blue-700 text-white shrink-0 shadow-sm"
               variant={isLoading ? "destructive" : "default"}
             >
-              {isLoading ? <Square className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+              {isLoading ? <Square className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}
             </Button>
           </div>
         </footer>
