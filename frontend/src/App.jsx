@@ -485,27 +485,39 @@ const AgentInfoModal = ({ isOpen, onClose }) => {
 function App() {
   const [messages, setMessages] = useState([
     { role: 'agent', content: 'Hello! I am your mobile gaming data analyst. How can I help you today?' }
-  ])
-  // Auto-authenticate when behind IAP (production) - skip login screen
-  // In development, still use localStorage for manual login
+  ]);
   const isProduction = !window.location.hostname.includes('localhost');
   const [accessToken, setAccessToken] = useState(
-    isProduction ? 'iap_authenticated' : localStorage.getItem('looker_access_token')
-  )
-  const [input, setInput] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-  const [agentType, setAgentType] = useState('fast') // 'fast', 'deep', or 'mcp'
-  const [isInfoModalOpen, setIsInfoModalOpen] = useState(false)
+    isProduction ? 'iap_authenticated' : (localStorage.getItem('looker_access_token') || 'local_authenticated')
+  );
+  const [activeDashboard, setActiveDashboard] = useState('ai_summary');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(600);
+  const [isResizing, setIsResizing] = useState(false);
+  const [signedUrl, setSignedUrl] = useState(null);
+  const [embedError, setEmbedError] = useState(null);
+  const [expandedGraph, setExpandedGraph] = useState(null);
+  const sidebarRef = useRef(null);
+  const isResizingRef = useRef(false);
+
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [agentType, setAgentType] = useState('fast'); // 'fast', 'deep', or 'mcp'
+  const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
   const [isLongQuery, setIsLongQuery] = useState(false);
-  const messagesEndRef = useRef(null)
+  const messagesEndRef = useRef(null);
   // Generate a unique session ID when the component mounts
-  const [sessionId, setSessionId] = useState(() => 'session_' + Math.random().toString(36).substr(2, 9))
+  const [sessionId, setSessionId] = useState(() => 'session_' + Math.random().toString(36).substr(2, 9));
 
   // State for Deep Test Suite
   const [isTestModalOpen, setIsTestModalOpen] = useState(false);
   const [testLogs, setTestLogs] = useState([]);
   const [isRunningTests, setIsRunningTests] = useState(false);
   const [currentThought, setCurrentThought] = useState(null); // Track live status
+
+  const [isTestMenuOpen, setIsTestMenuOpen] = useState(false);
+  const [isHistoryMenuOpen, setIsHistoryMenuOpen] = useState(false);
+  const [history, setHistory] = useState([]);
 
   // Dataset config loaded from API
   const [datasetConfig, setDatasetConfig] = useState({
@@ -535,10 +547,6 @@ function App() {
     };
     fetchDatasetConfig();
   }, []);
-
-  const [isTestMenuOpen, setIsTestMenuOpen] = useState(false);
-  const [isHistoryMenuOpen, setIsHistoryMenuOpen] = useState(false);
-  const [history, setHistory] = useState([]);
 
   // Fetch history
   const fetchHistory = async () => {
@@ -626,25 +634,6 @@ function App() {
     // Submit
     await handleSubmit(null, question);
   };
-
-  const [activeDashboard, setActiveDashboard] = useState('ai_summary');
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-
-  const [sidebarWidth, setSidebarWidth] = useState(600);
-  const [isResizing, setIsResizing] = useState(false);
-
-  // LOOKER EMBED STATE
-  const [signedUrl, setSignedUrl] = useState(null);
-
-  const [embedError, setEmbedError] = useState(null);
-
-  // Expanded graph visualization state (shown in main content area)
-  const [expandedGraph, setExpandedGraph] = useState(null);
-
-  const sidebarRef = useRef(null);
-
-  // Ref to track resize state in event listeners without dependency issues
-  const isResizingRef = useRef(false);
 
   const startResizing = (e) => {
     e.preventDefault();
