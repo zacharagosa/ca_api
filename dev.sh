@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Ensure NVM and Node/NPM are in PATH
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+
 # Function to kill background processes on exit
 cleanup() {
     echo "Stopping servers..."

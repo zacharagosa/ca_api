@@ -1,19 +1,19 @@
 ---
-description: Start the development environment (Backend + Frontend) and handle Google Cloud authentication.
+description: Start and manage the Gaming Analytics Demo environment (Backend + Frontend) and verify health.
 ---
 
 // turbo-all
-1. Re-authenticate with Google Cloud to ensure the Deep Analysis mode works correctly:
+1. Start the entire Demo Environment (Backend on 8080 + Frontend on 5173):
 ```bash
-gcloud auth application-default login
+bash scripts/start_demo.sh
 ```
 
-2. Start the Backend Flask Server:
+2. Check Status and Health:
 ```bash
-./venv/bin/python server.py
+bash scripts/status_demo.sh
 ```
 
-3. Start the Frontend Vite Server:
+3. To Stop the Demo Environment:
 ```bash
-cd frontend && npm run dev
+bash scripts/stop_demo.sh
 ```

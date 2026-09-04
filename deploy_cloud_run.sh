@@ -11,20 +11,30 @@ if [ -f .env ]; then
   export $(cat .env | sed 's/#.*//g' | xargs)
 fi
 
-# Validate required environment variables
-if [ -z "$PROJECT_ID" ]; then
-  echo "ERROR: PROJECT_ID not set. Please set it in .env or export it."
-  exit 1
+# Determine alphanumeric Project ID for gcloud commands vs numeric Project Number for Vertex AI
+GCP_PROJECT="${GCP_PROJECT_ID:-$PROJECT_ID}"
+if [[ "$GCP_PROJECT" =~ ^[0-9]+$ ]]; then
+  if [ -n "$GCP_PROJECT_ID" ] && ! [[ "$GCP_PROJECT_ID" =~ ^[0-9]+$ ]]; then
+    GCP_PROJECT="$GCP_PROJECT_ID"
+  else
+    GCP_PROJECT="aragosalooker"
+  fi
 fi
 
+PROJECT_NUM=${PROJECT_ID:-"1094200614711"}
+
 echo "=== Gaming Analytics Deployment ==="
-echo "Project: $PROJECT_ID"
+echo "Project ID: $GCP_PROJECT (Number: $PROJECT_NUM)"
 echo "Region: $REGION"
 echo "Service: $SERVICE_NAME"
 echo ""
 
 # Step 1: Build frontend
 echo "1. Building frontend..."
+export NVM_DIR="$HOME/.nvm"
+if [ -s "$NVM_DIR/nvm.sh" ]; then
+    \. "$NVM_DIR/nvm.sh"
+fi
 cd frontend
 npm run build
 cd ..
@@ -32,14 +42,14 @@ cd ..
 # Step 2: Deploy to Cloud Run (IAM-protected)
 echo "2. Deploying to Cloud Run (IAM-protected)..."
 gcloud run deploy $SERVICE_NAME \
-  --project ${PROJECT_ID} \
+  --project ${GCP_PROJECT} \
   --source . \
   --region $REGION \
   --allow-unauthenticated \
-  --set-env-vars PROJECT_ID=${PROJECT_ID},LOCATION=${LOCATION:-global},LOOKER_CLIENT_ID=${LOOKER_CLIENT_ID},LOOKER_CLIENT_SECRET=${LOOKER_CLIENT_SECRET},LOOKER_INSTANCE_URI=${LOOKER_INSTANCE_URI},LOOKML_MODEL=${LOOKML_MODEL:-gaming},EXPLORE=${EXPLORE:-events},DATASET_NAME=${DATASET_NAME:-events},NARRATIVE_SECRET_TOKEN=${NARRATIVE_SECRET_TOKEN}
+  --set-env-vars PROJECT_ID=${PROJECT_NUM},GCP_PROJECT_ID=${GCP_PROJECT},LOCATION=${LOCATION:-global},LOOKER_CLIENT_ID=${LOOKER_CLIENT_ID},LOOKER_CLIENT_SECRET=${LOOKER_CLIENT_SECRET},LOOKER_INSTANCE_URI=${LOOKER_INSTANCE_URI},LOOKML_MODEL=${LOOKML_MODEL:-gaming},EXPLORE=${EXPLORE:-events},DATASET_NAME=${DATASET_NAME:-events},NARRATIVE_SECRET_TOKEN=${NARRATIVE_SECRET_TOKEN}
 
 # Get the service URL
-SERVICE_URL=$(gcloud run services describe $SERVICE_NAME --region $REGION --project $PROJECT_ID --format='value(status.url)')
+SERVICE_URL=$(gcloud run services describe $SERVICE_NAME --region $REGION --project $GCP_PROJECT --format='value(status.url)')
 
 echo ""
 echo "=== Deployment Complete ==="

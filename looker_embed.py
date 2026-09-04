@@ -35,28 +35,81 @@ class LookerEmbedManager:
         """
         import agent
         
-        print(f"=== Generating SSO Embed URL ===")
-        print(f"  Target URL: {target_url}")
-        print(f"  User ID: {user_id}")
-        print(f"  Name: {first_name} {last_name}")
-        print(f"  LookML Model: {agent.LOOKML_MODEL}")
-        print(f"  Looker Instance: {self.looker_uri}")
+        base_uri = (
+            self.looker_uri 
+            or os.getenv("LOOKER_INSTANCE_URI") 
+            or os.getenv("LOOKERSDK_BASE_URL") 
+            or getattr(agent, "LOOKER_INSTANCE_URI", "") 
+            or "https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app"
+        ).rstrip('/')
+        
+        # Clean & normalize path
+        if not target_url or target_url == "embedded_explore":
+            path = f"/embed/explore/{agent.LOOKML_MODEL or 'gaming'}/{agent.EXPLORE or 'events'}"
+        elif "/login/embed/" in target_url:
+            parsed = urllib.parse.urlparse(target_url)
+            path = parsed.path.replace("/login/embed", "")
+            if parsed.query:
+                # Retain non-auth query params
+                query_params = urllib.parse.parse_qs(parsed.query)
+                clean_query = {k: v for k, v in query_params.items() if k not in ['signature', 'nonce', 'time', 'session_length', 'external_user_id', 'permissions', 'models']}
+                if clean_query:
+                    path = f"{path}?{urllib.parse.urlencode(clean_query, doseq=True)}"
+        elif target_url.startswith("http"):
+            parsed = urllib.parse.urlparse(target_url)
+            path = parsed.path
+            if parsed.query:
+                path = f"{path}?{parsed.query}"
+        elif not target_url.startswith("/"):
+            if target_url.isdigit() or target_url.startswith("custom_"):
+                dash_id = target_url.replace("custom_", "")
+                path = f"/embed/dashboards/{dash_id}"
+            else:
+                path = f"/{target_url}"
+        else:
+            path = target_url
+        
+        full_target_url = f"{base_uri}{path}"
         
         # Force Looker theme if not already present
-        if "theme=" not in target_url:
-            separator = "&" if "?" in target_url else "?"
-            target_url = f"{target_url}{separator}theme=Looker"
-            print(f"  Updated Target URL with Theme: {target_url}")
+        if "theme=" not in full_target_url:
+            separator = "&" if "?" in full_target_url else "?"
+            full_target_url = f"{full_target_url}{separator}theme=Looker"
+        
+        print(f"=== Generating SSO Embed URL ===")
+        print(f"  Full Target URL: {full_target_url}")
+        print(f"  User ID: {user_id}")
+        print(f"  Name: {first_name} {last_name}")
+        
+        # Dynamically grant access to all available models on instance
+        try:
+            available_models = [m.name for m in self.sdk.all_lookml_models() if m.name]
+        except Exception:
+            available_models = [agent.LOOKML_MODEL or "gaming", "thelook", "ga4", "panera_digital_analytics"]
+            
+        permissions = [
+            "access_data",
+            "see_looks",
+            "see_user_dashboards",
+            "see_lookml_dashboards",
+            "explore",
+            "save_content",
+            "embed_save_shared_space",
+            "embed_browse_spaces",
+            "see_drill_overlay",
+            "schedule_look_emails",
+            "download_without_limit"
+        ]
         
         body = models40.EmbedSsoParams(
-            target_url=target_url,
-            session_length=3600,
+            target_url=full_target_url,
+            session_length=86400,
             force_logout_login=True,
             external_user_id=user_id,
             first_name=first_name,
             last_name=last_name,
-            permissions=["access_data", "see_looks", "see_user_dashboards", "see_lookml_dashboards", "explore"],
-            models=list(set([agent.LOOKML_MODEL, "gaming", "snowplow"])),
+            permissions=permissions,
+            models=available_models,
             group_ids=[],
             external_group_id="",
             user_attributes={"locale": "en_US"}
@@ -72,8 +125,4 @@ class LookerEmbedManager:
             return response.url
         except Exception as e:
             print(f"  ❌ SDK Embed Error: {e}")
-            if "RemoteDisconnected" in str(e) or "Connection refused" in str(e):
-                print("  HINT: check if LOOKERSDK_BASE_URL needs port 19999 or /api/4.0 suffix.")
-            if "not enabled" in str(e).lower() or "sso" in str(e).lower():
-                print("  HINT: Embed SSO Authentication must be enabled in Looker Admin > Platform > Embed")
             raise e

@@ -125,3 +125,6 @@ class ConversationManager:
         file_path = os.path.join(self.storage_dir, f"{session_id}.json")
         if os.path.exists(file_path):
             os.remove(file_path)
+
+# Singleton instance for app-wide conversation storage
+conversation_manager = ConversationManager()

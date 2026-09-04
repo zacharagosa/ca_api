@@ -108,6 +108,21 @@ def load_agent_config():
 AGENT_CONFIG = load_agent_config()
 
 load_dotenv()
+
+# Normalize and defensively validate GOOGLE_APPLICATION_CREDENTIALS
+_sa_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+if _sa_path:
+    _expanded = os.path.expanduser(_sa_path)
+    if os.path.exists(_expanded):
+        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = _expanded
+    else:
+        _user_sa = os.path.expanduser('~/.config/gcloud/sa_key.json')
+        if os.path.exists(_user_sa):
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = _user_sa
+        else:
+            print(f"WARNING: GOOGLE_APPLICATION_CREDENTIALS '{_sa_path}' not found. Falling back to Application Default Credentials (ADC).")
+            os.environ.pop('GOOGLE_APPLICATION_CREDENTIALS', None)
+
 import threading
 # from google.cloud import geminidataanalytics
 from google.api_core import client_options as client_options_lib
@@ -146,9 +161,10 @@ class AuthTokenManager:
 
 # Global instance
 auth_manager = AuthTokenManager()
+import datetime
 import vertexai
 from vertexai.preview import reasoning_engines
-from vertexai.generative_models import GenerativeModel, Tool, FunctionDeclaration, Part, ToolConfig
+from vertexai.generative_models import GenerativeModel, Tool, FunctionDeclaration, Part, Content, ToolConfig
 import random
 
 def retry_api_call(func, retries=3, delay=1, backoff=2, jitter=0.1, error_msg="API call failed"):
@@ -203,9 +219,10 @@ if SPANNER_INSTANCE_ID:
     print(f"INFO: Spanner configured: {SPANNER_PROJECT_ID}/{SPANNER_INSTANCE_ID}/{SPANNER_DATABASE_ID}")
 
 print(f"INFO: Using Looker instance: {LOOKER_INSTANCE_URI}, model: {LOOKML_MODEL}, explore: {EXPLORE}")
-PROJECT_ID = os.getenv("PROJECT_ID", "1094200614711")
+PROJECT_ID = os.getenv("GCP_PROJECT_ID") or os.getenv("PROJECT_ID", "1094200614711")
 if PROJECT_ID == "aragosalooker":
     PROJECT_ID = "1094200614711" # Force numeric ID if default/old string is found
+VERTEX_LOCATION = os.getenv("VERTEX_LOCATION", "global")
 LOCATION = os.getenv("LOCATION", "global")
 
 # GA API: Regional endpoint support for data residency compliance
@@ -231,15 +248,20 @@ def _build_ca_api_endpoint(location: str) -> str:
 CA_API_ENDPOINT = _build_ca_api_endpoint(CA_API_LOCATION)
 print(f"INFO: CA API endpoint: {CA_API_ENDPOINT} (location: {CA_API_LOCATION})")
 
-try:
-    vertexai.init(
-        project=PROJECT_ID,
-        location=LOCATION,
-        staging_bucket="gs://ca_api",
-    )
-    print("INFO: Vertex AI initialized successfully")
-except Exception as e:
-    print(f"WARNING: Vertex AI initialization failed: {e}")
+def init_vertex_ai():
+    try:
+        creds = auth_manager.get_credentials()
+        vertexai.init(
+            project=PROJECT_ID,
+            location=VERTEX_LOCATION,
+            credentials=creds,
+            staging_bucket="gs://ca_api",
+        )
+        print(f"INFO: Vertex AI initialized successfully (project: {PROJECT_ID}, location: {VERTEX_LOCATION})")
+    except Exception as e:
+        print(f"WARNING: Vertex AI initialization failed: {e}")
+
+init_vertex_ai()
 
 
 import queue
@@ -928,9 +950,21 @@ def query_spanner(sql: str):
                 
                 if columns:
                     for i, val in enumerate(row):
-                        row_dict[columns[i]] = val
+                        if hasattr(val, 'isoformat'):
+                            row_dict[columns[i]] = val.isoformat()
+                        elif isinstance(val, (datetime.date, datetime.datetime)):
+                            row_dict[columns[i]] = str(val)
+                        else:
+                            row_dict[columns[i]] = val
                 else:
-                    row_dict = {f"col_{i}": val for i, val in enumerate(row)}
+                    for i, val in enumerate(row):
+                        col_k = f"col_{i}"
+                        if hasattr(val, 'isoformat'):
+                            row_dict[col_k] = val.isoformat()
+                        elif isinstance(val, (datetime.date, datetime.datetime)):
+                            row_dict[col_k] = str(val)
+                        else:
+                            row_dict[col_k] = val
                 
                 rows.append(row_dict)
                 
@@ -1085,6 +1119,853 @@ def extract_graph_from_rows(rows):
         return None
         
     return {'nodes': list(nodes.values()), 'links': links}
+
+
+ACTIVE_DASHBOARDS_REGISTRY = {}
+
+def organize_dashboard_layout(sdk, dash_id: str):
+    """
+    Auto-organizes dashboard layout components into a clean, professional 12-column grid:
+    - Single-value KPIs: Top row(s) (width 4, height 3, 3 per row)
+    - Charts (Line/Column/Bar/Area/Pie): Middle rows (width 6, height 6, 2 per row)
+    - Detailed Tables (Grid): Bottom row(s) (width 12, height 7, 1 per row)
+    """
+    try:
+        from looker_sdk import models40
+        dash = sdk.dashboard(str(dash_id))
+        layouts = dash.dashboard_layouts or []
+        if not layouts:
+            return
+        layout = layouts[0]
+        components = layout.dashboard_layout_components or []
+        if not components:
+            return
+            
+        elements = {str(el.id): el for el in (dash.dashboard_elements or [])}
+        
+        kpi_comps = []
+        chart_comps = []
+        table_comps = []
+        
+        for comp in components:
+            el_id = str(comp.dashboard_element_id)
+            el = elements.get(el_id)
+            vis_type = ""
+            if el and el.result_maker and el.result_maker.vis_config:
+                vis_type = el.result_maker.vis_config.get("type", "")
+            elif comp.vis_type:
+                vis_type = comp.vis_type
+                
+            if vis_type == "single_value" or (el and len(getattr(el.query, "fields", []) or []) == 1):
+                kpi_comps.append(comp)
+            elif vis_type == "looker_grid" or (el and len(getattr(el.query, "fields", []) or []) >= 4):
+                table_comps.append(comp)
+            else:
+                chart_comps.append(comp)
+                
+        current_row = 0
+        # 1. Layout KPIs (3 per row, w=4, h=3)
+        for i, comp in enumerate(kpi_comps):
+            col = (i % 3) * 4
+            if i > 0 and col == 0:
+                current_row += 3
+            try:
+                sdk.update_dashboard_layout_component(str(comp.id), body=models40.WriteDashboardLayoutComponent(
+                    row=current_row, column=col, width=4, height=3
+                ))
+            except Exception as e:
+                log_debug(f"Could not update layout for KPI {comp.id}: {e}")
+        if kpi_comps:
+            current_row += 3
+            
+        # 2. Layout Charts (2 per row, w=6, h=6)
+        for i, comp in enumerate(chart_comps):
+            col = (i % 2) * 6
+            if i > 0 and col == 0:
+                current_row += 6
+            try:
+                sdk.update_dashboard_layout_component(str(comp.id), body=models40.WriteDashboardLayoutComponent(
+                    row=current_row, column=col, width=6, height=6
+                ))
+            except Exception as e:
+                log_debug(f"Could not update layout for chart {comp.id}: {e}")
+        if chart_comps:
+            current_row += 6
+            
+        # 3. Layout Tables (1 per row, w=12, h=7)
+        for comp in table_comps:
+            try:
+                sdk.update_dashboard_layout_component(str(comp.id), body=models40.WriteDashboardLayoutComponent(
+                    row=current_row, column=0, width=12, height=7
+                ))
+            except Exception as e:
+                log_debug(f"Could not update layout for table {comp.id}: {e}")
+            current_row += 7
+            
+        log_thought(f"Optimized dashboard grid layout ({len(kpi_comps)} KPI, {len(chart_comps)} Chart, {len(table_comps)} Table)")
+    except Exception as layout_err:
+        log_thought(f"Warning: Could not auto-organize layout: {layout_err}")
+
+
+def create_looker_dashboard(title: str, description: str = "", tiles: list = None, filters: list = None, session_id: str = None):
+    """
+    Creates a new custom Looker dashboard on the fly with specified visual tiles, queries, and filters.
+    """
+    try:
+        import looker_sdk
+        from looker_sdk import models40
+        from looker_embed import LookerEmbedManager
+
+        log_thought(f"Looker MCP: Creating Dashboard '{title}' with {len(tiles) if tiles else 0} tile(s) and {len(filters) if filters else 0} filter(s)...")
+        
+        # Ensure Looker SDK environment variables are set
+        if LOOKER_INSTANCE_URI:
+            os.environ["LOOKERSDK_BASE_URL"] = LOOKER_INSTANCE_URI
+        if LOOKER_CLIENT_ID:
+            os.environ["LOOKERSDK_CLIENT_ID"] = LOOKER_CLIENT_ID
+        if LOOKER_CLIENT_SECRET:
+            os.environ["LOOKERSDK_CLIENT_SECRET"] = LOOKER_CLIENT_SECRET
+            
+        sdk = looker_sdk.init40()
+        
+        # Fetch explore schema to strictly validate dimensions and measures
+        explore_name = EXPLORE or "events"
+        model_name = LOOKML_MODEL or "gaming"
+        valid_all = set()
+        valid_short = {}
+        try:
+            explore_info = sdk.lookml_model_explore(lookml_model_name=model_name, explore_name=explore_name)
+            valid_dims = {d.name for d in explore_info.fields.dimensions}
+            valid_meas = {m.name for m in explore_info.fields.measures}
+            valid_all = valid_dims | valid_meas
+            valid_short = {k.split('.')[-1]: k for k in valid_all}
+        except Exception as schema_err:
+            log_thought(f"Warning: Could not fetch explore schema: {schema_err}")
+
+        FIELD_ALIASES = {
+            "system_game_name": "game_name",
+            "game": "game_name",
+            "game_title": "game_name",
+            "app_name": "game_name",
+            "dau": "number_of_users",
+            "active_users": "number_of_users",
+            "daily_active_users": "number_of_users",
+            "users": "number_of_users",
+            "total_users": "number_of_users",
+            "unique_users": "number_of_users",
+            "new_users": "number_of_new_users",
+            "installs": "number_of_new_users",
+            "revenue": "total_revenue",
+            "iap": "total_iap_revenue",
+            "iap_revenue": "total_iap_revenue",
+            "ads": "total_ad_revenue",
+            "ad_revenue": "total_ad_revenue",
+            "sessions": "number_of_sesssions",
+            "session_count": "number_of_sesssions",
+            "session_counts": "number_of_sesssions",
+            "total_sessions": "number_of_sesssions",
+            "number_of_sessions": "number_of_sesssions",
+            "events_count": "count",
+            "event_count": "count",
+            "date": "event_date",
+            "d1": "d1_retention_rate",
+            "d1_retention": "d1_retention_rate",
+            "d7_retention": "d7_retention_rate",
+            "d14_retention": "d14_retention_rate",
+            "d30_retention": "d30_retention_rate",
+        }
+
+        def resolve_field(raw_field: str, default_explore: str) -> str:
+            raw_clean = raw_field.replace(f"{default_explore}.", "").replace(f"{default_explore}_", "")
+            raw_base = raw_clean.split('.')[-1].lower()
+            mapped_base = FIELD_ALIASES.get(raw_base, raw_base)
+            candidate = f"{default_explore}.{mapped_base}"
+            if candidate in valid_all:
+                return candidate
+            if mapped_base in valid_short:
+                return valid_short[mapped_base]
+            if raw_field in valid_all:
+                return raw_field
+            return candidate if not valid_all else None
+
+        # 1. Resolve or Create Dedicated AI Dashboards Folder under Shared (1)
+        target_folder_id = "47"
+        dash_body = models40.WriteDashboard(
+            title=title,
+            description=description or "AI-Generated Gaming LiveOps Dashboard",
+            folder_id=target_folder_id
+        )
+        try:
+            dash = sdk.create_dashboard(body=dash_body)
+        except Exception as create_dash_err:
+            if "already_exists" in str(create_dash_err) or "already exists" in str(create_dash_err):
+                import time
+                timestamp_str = time.strftime("%b %d, %H:%M")
+                dash_body.title = f"{title} ({timestamp_str})"
+                dash = sdk.create_dashboard(body=dash_body)
+            else:
+                raise create_dash_err
+        log_thought(f"Dashboard created successfully in AI folder (ID: {dash.id}, Folder: {target_folder_id})")
+        
+        # 2. Create Dashboard Filters (with duplicate prevention)
+        created_filters = []
+        filterables_list = []
+        seen_filter_keys = set()
+        if filters:
+            for filt in filters:
+                filt_name = filt.get("name", "Filter")
+                filt_title = filt.get("title", filt_name)
+                filt_dim = resolve_field(filt.get("dimension") or filt.get("field", "event_date"), explore_name) or f"{explore_name}.event_date"
+                filt_def = filt.get("default_value", "30 days" if "date" in filt_dim else "")
+                filter_key = filt_name.lower().strip()
+                if filter_key in seen_filter_keys:
+                    continue
+                try:
+                    df = sdk.create_dashboard_filter(body=models40.CreateDashboardFilter(
+                        dashboard_id=str(dash.id),
+                        name=filt_name,
+                        title=filt_title,
+                        type="field_filter",
+                        model=model_name,
+                        explore=explore_name,
+                        dimension=filt_dim,
+                        default_value=filt_def,
+                        allow_multiple_values=True,
+                        ui_config={"type": "advanced" if "date" in filt_dim else "dropdown_menu", "display": "inline"}
+                    ))
+                    seen_filter_keys.add(filter_key)
+                    created_filters.append({"id": df.id, "name": df.name, "dimension": filt_dim})
+                    filterables_list.append(
+                        models40.ResultMakerFilterables(
+                            model=model_name,
+                            view=explore_name,
+                            listen=[models40.ResultMakerFilterablesListen(
+                                dashboard_filter_name=df.name,
+                                field=filt_dim
+                            )]
+                        )
+                    )
+                    log_thought(f"Added dashboard filter '{filt_name}' on {filt_dim}")
+                except Exception as filter_create_err:
+                    log_thought(f"Warning: Could not create dashboard filter '{filt_name}': {filter_create_err}")
+
+        # 3. Create Dashboard Elements / Tiles
+        created_elements = []
+        if tiles:
+            for idx, tile in enumerate(tiles):
+                tile_title = tile.get("title", f"Metric {idx+1}")
+                explore = tile.get("explore") or explore_name
+                raw_fields = tile.get("fields") or []
+                raw_filters = tile.get("filters") or {}
+                sorts = tile.get("sorts") or []
+                limit = str(tile.get("limit", "500"))
+                
+                # Resolve & sanitize fields
+                formatted_fields = []
+                for f in raw_fields:
+                    res_f = resolve_field(f, explore)
+                    if res_f and res_f not in formatted_fields:
+                        formatted_fields.append(res_f)
+                
+                if not formatted_fields:
+                    formatted_fields = [f"{explore}.count"]
+                
+                formatted_filters = {}
+                if isinstance(raw_filters, dict):
+                    for k, v in raw_filters.items():
+                        if (k.lower() in [explore_name, 'events', 'gaming']) and ':' in str(v):
+                            parts = str(v).split(':', 1)
+                            filter_key = parts[0].strip()
+                            filter_val = parts[1].strip().strip("'").strip('"')
+                        elif k.lower() in [explore_name, 'events', 'gaming']:
+                            filter_val = str(v).strip().strip("'").strip('"')
+                            if not filter_val.replace('.', '').isdigit() and not any(op in filter_val for op in ['>', '<', '=', 'NULL']):
+                                filter_key = "game_name"
+                            else:
+                                filter_key = "count"
+                        else:
+                            filter_key = k
+                            filter_val = str(v).strip().strip("'").strip('"')
+                            
+                        res_k = resolve_field(filter_key, explore)
+                        if res_k:
+                            if res_k.endswith('.count') and not filter_val.replace('.', '').replace('-', '').isdigit() and not any(op in filter_val for op in ['>', '<', '=', 'NULL']):
+                                res_k = f"{explore}.game_name"
+                            formatted_filters[res_k] = filter_val
+                
+                if explore == "events" or "events" in explore_name or any("event_date" in f for f in formatted_fields):
+                    if not any("event_date" in k for k in formatted_filters.keys()):
+                        if "7 days" in tile_title.lower() or "7d" in tile_title.lower():
+                            formatted_filters[f"{explore}.event_date"] = "7 days"
+                        elif "90 days" in tile_title.lower():
+                            formatted_filters[f"{explore}.event_date"] = "90 days"
+                        else:
+                            formatted_filters[f"{explore}.event_date"] = "30 days"
+                
+                formatted_sorts = []
+                if isinstance(sorts, list):
+                    for s in sorts:
+                        parts = s.split()
+                        col = parts[0]
+                        order = f" {parts[1]}" if len(parts) > 1 else ""
+                        res_col = resolve_field(col, explore)
+                        if res_col:
+                            formatted_sorts.append(f"{res_col}{order}")
+
+                vis_type = "looker_grid"
+                if any("date" in f or "time" in f for f in formatted_fields) and len(formatted_fields) >= 2:
+                    vis_type = "looker_line"
+                elif any("country" in f or "game" in f or "name" in f or "category" in f for f in formatted_fields) and len(formatted_fields) >= 2:
+                    vis_type = "looker_column"
+                elif len(formatted_fields) == 1:
+                    vis_type = "single_value"
+
+                vis_config = {
+                    "type": vis_type,
+                    "show_view_names": False,
+                    "show_y_axis_labels": True,
+                    "show_y_axis_ticks": True,
+                    "show_x_axis_label": True,
+                    "show_x_axis_ticks": True,
+                    "legend_position": "center"
+                }
+
+                try:
+                    q_body = models40.WriteQuery(
+                        model=model_name,
+                        view=explore,
+                        fields=formatted_fields,
+                        filters=formatted_filters,
+                        sorts=formatted_sorts,
+                        limit=limit,
+                        vis_config=vis_config
+                    )
+                    q = sdk.create_query(body=q_body)
+                    elem_body = models40.WriteDashboardElement(
+                        dashboard_id=str(dash.id),
+                        type="vis",
+                        title=tile_title,
+                        query_id=q.id,
+                        result_maker=models40.WriteResultMakerWithIdVisConfigAndDynamicFields(
+                            vis_config=vis_config,
+                            filterables=filterables_list if filterables_list else None
+                        )
+                    )
+                    elem = sdk.create_dashboard_element(body=elem_body)
+                    created_elements.append({
+                        "id": elem.id,
+                        "title": tile_title,
+                        "query_id": q.id,
+                        "fields": formatted_fields
+                    })
+                    log_thought(f"Added tile '{tile_title}'")
+                except Exception as tile_err:
+                    log_thought(f"Warning: Could not create tile '{tile_title}': {tile_err}")
+        
+        # 4. Auto-organize Grid Layout
+        organize_dashboard_layout(sdk, dash.id)
+
+        # Generate Embed SSO URL
+        embed_mgr = LookerEmbedManager()
+        target_url = f"{LOOKER_INSTANCE_URI.rstrip('/')}/embed/dashboards/{dash.id}"
+        signed_url = embed_mgr.generate_signed_url(
+            target_url=target_url,
+            user_id="embed_admin",
+            first_name="Gaming",
+            last_name="Analyst"
+        )
+        
+        dashboard_meta = {
+            "id": f"custom_{dash.id}",
+            "looker_id": str(dash.id),
+            "title": title,
+            "description": description,
+            "url": f"/embed/dashboards/{dash.id}",
+            "signed_url": signed_url,
+            "icon": "LayoutDashboard",
+            "tiles_count": len(created_elements),
+            "tiles": created_elements,
+            "filters": created_filters
+        }
+        
+        ACTIVE_DASHBOARDS_REGISTRY["latest"] = dashboard_meta
+        if session_id:
+            ACTIVE_DASHBOARDS_REGISTRY[session_id] = dashboard_meta
+        
+        if data_queue:
+            data_queue.put({
+                "type": "dashboard_created",
+                "dashboard": dashboard_meta
+            })
+            
+        return {
+            "status": "success",
+            "message": f"Successfully created Looker dashboard '{title}' (ID: {dash.id}) with {len(created_elements)} live tiles and {len(created_filters)} filter(s).",
+            "dashboard_id": str(dash.id),
+            "dashboard": dashboard_meta,
+            "embed_url": signed_url
+        }
+    except Exception as e:
+        error_msg = f"Failed to create Looker dashboard: {e}"
+        log_thought(error_msg)
+        return {"status": "error", "error": error_msg}
+
+
+
+def edit_looker_dashboard(
+    dashboard_id: str = None,
+    title: str = None,
+    description: str = None,
+    add_tiles: list = None,
+    modify_tiles: list = None,
+    delete_tile_titles: list = None,
+    add_filters: list = None,
+    delete_filters: list = None,
+    delete_filter_names: list = None,
+    session_id: str = None
+):
+    """
+    Edits an existing Looker dashboard by renaming, modifying existing tiles, adding/removing tiles, or adding/removing filters.
+    """
+    try:
+        import looker_sdk
+        from looker_sdk import models40
+        from looker_embed import LookerEmbedManager
+        
+        target_id = dashboard_id
+        if isinstance(target_id, list):
+            if not delete_filters:
+                delete_filters = target_id
+            target_id = None
+        elif target_id and not str(target_id).replace("custom_", "").isdigit():
+            if not delete_filters and any(kw in str(target_id).lower() for kw in ["filter", "game", "date"]):
+                delete_filters = [str(target_id)]
+            target_id = None
+
+        if not target_id:
+            active_dash = (ACTIVE_DASHBOARDS_REGISTRY.get(session_id) if session_id else None) or ACTIVE_DASHBOARDS_REGISTRY.get("latest")
+            if active_dash:
+                target_id = active_dash.get("looker_id")
+            
+        if not target_id:
+            return {"status": "error", "error": "No dashboard_id provided and no active dashboard found in session."}
+            
+        clean_id = str(target_id).replace("custom_", "")
+        log_thought(f"Looker MCP: Editing Dashboard ID {clean_id}...")
+        
+        if LOOKER_INSTANCE_URI:
+            os.environ["LOOKERSDK_BASE_URL"] = LOOKER_INSTANCE_URI
+        if LOOKER_CLIENT_ID:
+            os.environ["LOOKERSDK_CLIENT_ID"] = LOOKER_CLIENT_ID
+        if LOOKER_CLIENT_SECRET:
+            os.environ["LOOKERSDK_CLIENT_SECRET"] = LOOKER_CLIENT_SECRET
+            
+        sdk = looker_sdk.init40()
+        explore_name = EXPLORE or "events"
+        model_name = LOOKML_MODEL or "gaming"
+        
+        # 1. Update Title / Description if provided
+        if (title and isinstance(title, str) and not title.isdigit() and title != clean_id) or (description and isinstance(description, str) and not description.isdigit()):
+            update_body = models40.WriteDashboard()
+            if title and isinstance(title, str) and not title.isdigit() and title != clean_id:
+                update_body.title = title
+            if description and isinstance(description, str) and not description.isdigit():
+                update_body.description = description
+            try:
+                sdk.update_dashboard(clean_id, body=update_body)
+                log_thought(f"Updated dashboard metadata (Title: '{title}')")
+            except Exception as meta_err:
+                log_thought(f"Warning: Could not update dashboard title/description: {meta_err}")
+
+        def _as_list(val):
+            if val is None:
+                return []
+            if isinstance(val, list):
+                return val
+            if isinstance(val, (str, int, float)):
+                return [val]
+            try:
+                return list(val)
+            except Exception:
+                return [val]
+
+        dash = sdk.dashboard(clean_id)
+        existing_elements = dash.dashboard_elements or []
+        
+        # 2. Delete Tiles if requested
+        del_tiles_list = _as_list(delete_tile_titles)
+        deleted_count = 0
+        if del_tiles_list:
+            for del_target in del_tiles_list:
+                del_str = str(del_target).lower().strip()
+                for el in existing_elements:
+                    if str(el.id) == del_str or (el.title and del_str in el.title.lower()):
+                        try:
+                            sdk.delete_dashboard_element(str(el.id))
+                            deleted_count += 1
+                            log_thought(f"Deleted tile '{el.title}' (ID: {el.id})")
+                        except Exception as del_err:
+                            log_thought(f"Warning: Could not delete tile {el.id}: {del_err}")
+
+        # 3. Delete Filters if requested
+        to_delete_filters = _as_list(delete_filters) + _as_list(delete_filter_names)
+        if to_delete_filters:
+            dash = sdk.dashboard(clean_id)
+            existing_filters = dash.dashboard_filters or []
+            for del_f in to_delete_filters:
+                del_f_str = str(del_f).lower().strip()
+                for df in existing_filters:
+                    if str(df.id) == del_f_str or (df.name and del_f_str in df.name.lower()) or (df.title and del_f_str in df.title.lower()):
+                        try:
+                            sdk.delete_dashboard_filter(str(df.id))
+                            log_thought(f"Deleted dashboard filter '{df.name}' (ID: {df.id})")
+                        except Exception as del_f_err:
+                            log_thought(f"Warning: Could not delete filter {df.id}: {del_f_err}")
+
+        # 4. Add Dashboard Filters (with duplicate collision prevention)
+        add_filters_list = _as_list(add_filters)
+        if add_filters_list:
+            dash = sdk.dashboard(clean_id)
+            existing_filters = dash.dashboard_filters or []
+            existing_filt_names = {str(df.name).lower().strip() for df in existing_filters if df.name}
+            existing_filt_titles = {str(df.title).lower().strip() for df in existing_filters if df.title}
+            existing_filt_dims = {str(df.dimension).lower().strip() for df in existing_filters if df.dimension}
+            
+            for filt in add_filters_list:
+                if not isinstance(filt, dict):
+                    continue
+                filt_name = filt.get("name", "Filter")
+                filt_title = filt.get("title", filt_name)
+                filt_dim = filt.get("dimension") or filt.get("field", f"{explore_name}.event_date")
+                filt_def = filt.get("default_value", "30 days" if "date" in filt_dim else "")
+                
+                # Check for existing filter
+                if filt_name.lower().strip() in existing_filt_names or filt_title.lower().strip() in existing_filt_titles or filt_dim.lower().strip() in existing_filt_dims:
+                    log_thought(f"Filter '{filt_name}' on {filt_dim} already exists on dashboard. Skipping duplicate creation.")
+                    continue
+                    
+                try:
+                    df = sdk.create_dashboard_filter(body=models40.CreateDashboardFilter(
+                        dashboard_id=clean_id,
+                        name=filt_name,
+                        title=filt_title,
+                        type="field_filter",
+                        model=model_name,
+                        explore=explore_name,
+                        dimension=filt_dim,
+                        default_value=filt_def,
+                        allow_multiple_values=True,
+                        ui_config={"type": "advanced" if "date" in filt_dim else "dropdown_menu", "display": "inline"}
+                    ))
+                    existing_filt_names.add(filt_name.lower().strip())
+                    existing_filt_titles.add(filt_title.lower().strip())
+                    existing_filt_dims.add(filt_dim.lower().strip())
+                    log_thought(f"Added dashboard filter '{filt_name}' on {filt_dim}")
+                except Exception as filter_err:
+                    log_thought(f"Warning: Could not add filter '{filt_name}': {filter_err}")
+
+        # Refresh dashboard filters for wiring
+        dash = sdk.dashboard(clean_id)
+        current_filters = dash.dashboard_filters or []
+        filterables_list = []
+        for df in current_filters:
+            if df.name and df.dimension:
+                filterables_list.append(
+                    models40.ResultMakerFilterables(
+                        model=model_name,
+                        view=explore_name,
+                        listen=[models40.ResultMakerFilterablesListen(
+                            dashboard_filter_name=df.name,
+                            field=df.dimension
+                        )]
+                    )
+                )
+
+        # Wire/rewire existing tiles to the current active filters if filters were added or deleted
+        if (add_filters or to_delete_filters):
+            for el in dash.dashboard_elements or []:
+                if el.type == "vis" and el.result_maker:
+                    vis_cfg = el.result_maker.vis_config or {}
+                    try:
+                        sdk.update_dashboard_element(
+                            dashboard_element_id=str(el.id),
+                            body=models40.WriteDashboardElement(
+                                result_maker=models40.WriteResultMakerWithIdVisConfigAndDynamicFields(
+                                    vis_config=vis_cfg,
+                                    filterables=filterables_list if filterables_list else None
+                                )
+                            )
+                        )
+                        log_thought(f"Wired existing tile '{el.title}' to dashboard filters")
+                    except Exception as wire_err:
+                        log_thought(f"Warning: Could not wire tile {el.id}: {wire_err}")
+
+        explore_info = sdk.lookml_model_explore(lookml_model_name=model_name, explore_name=explore_name)
+        valid_dims = {d.name for d in explore_info.fields.dimensions}
+        valid_meas = {m.name for m in explore_info.fields.measures}
+        valid_all = valid_dims | valid_meas
+        valid_short = {k.split('.')[-1]: k for k in valid_all}
+
+        FIELD_ALIASES = {
+            "system_game_name": "game_name",
+            "game": "game_name",
+            "dau": "number_of_users",
+            "revenue": "total_revenue",
+            "iap": "total_iap_revenue",
+            "ads": "total_ad_revenue",
+            "sessions": "number_of_sesssions",
+            "number_of_sessions": "number_of_sesssions",
+            "date": "event_date",
+        }
+
+        def resolve_field(raw_field: str, default_explore: str) -> str:
+            raw_clean = raw_field.replace(f"{default_explore}.", "").replace(f"{default_explore}_", "")
+            raw_base = raw_clean.split('.')[-1].lower()
+            mapped_base = FIELD_ALIASES.get(raw_base, raw_base)
+            candidate = f"{default_explore}.{mapped_base}"
+            if candidate in valid_all:
+                return candidate
+            if mapped_base in valid_short:
+                return valid_short[mapped_base]
+            if raw_field in valid_all:
+                return raw_field
+            return candidate if not valid_all else None
+
+        # 5. Modify Existing Tiles (In-place updates)
+        modified_count = 0
+        mod_tiles_list = _as_list(modify_tiles)
+        if mod_tiles_list:
+            dash = sdk.dashboard(clean_id)
+            existing_elements = dash.dashboard_elements or []
+            
+            for mod in mod_tiles_list:
+                if not isinstance(mod, dict):
+                    continue
+                target_title = str(mod.get("tile_title", "")).lower().strip()
+                if not target_title:
+                    continue
+                    
+                target_el = None
+                for el in existing_elements:
+                    if str(el.id) == target_title or (el.title and target_title in el.title.lower()):
+                        target_el = el
+                        break
+                        
+                if not target_el or not target_el.query_id:
+                    log_thought(f"Warning: Could not find tile matching '{target_title}' to modify.")
+                    continue
+                    
+                try:
+                    old_query = sdk.query(target_el.query_id)
+                    new_title = mod.get("new_title") or target_el.title
+                    
+                    # Updated fields
+                    raw_fields = mod.get("fields")
+                    if raw_fields and isinstance(raw_fields, list):
+                        updated_fields = [resolve_field(f, explore_name) for f in raw_fields if resolve_field(f, explore_name)]
+                    else:
+                        updated_fields = list(old_query.fields or [])
+                        
+                    # Updated filters
+                    updated_filters = dict(old_query.filters or {})
+                    if "timeframe" in mod and mod["timeframe"]:
+                        updated_filters[f"{explore_name}.event_date"] = str(mod["timeframe"]).strip("'").strip('"')
+                    if "filters" in mod and isinstance(mod["filters"], dict):
+                        for k, v in mod["filters"].items():
+                            res_k = resolve_field(k, explore_name)
+                            if res_k:
+                                updated_filters[res_k] = str(v).strip("'").strip('"')
+                                
+                    # Updated vis_config
+                    vis_cfg = dict(old_query.vis_config or {})
+                    if "vis_type" in mod and mod["vis_type"]:
+                        vis_cfg["type"] = mod["vis_type"]
+                    elif updated_fields:
+                        if any("date" in f for f in updated_fields) and len(updated_fields) >= 2:
+                            vis_cfg["type"] = "looker_line"
+                        elif any("country" in f or "game" in f for f in updated_fields) and len(updated_fields) >= 2:
+                            vis_cfg["type"] = "looker_column"
+                        elif len(updated_fields) == 1:
+                            vis_cfg["type"] = "single_value"
+                        else:
+                            vis_cfg["type"] = "looker_grid"
+                            
+                    # Create new query with modified settings
+                    q_body = models40.WriteQuery(
+                        model=old_query.model or model_name,
+                        view=old_query.view or explore_name,
+                        fields=updated_fields if updated_fields else [f"{explore_name}.count"],
+                        filters=updated_filters,
+                        sorts=old_query.sorts or [],
+                        limit=old_query.limit or "500",
+                        vis_config=vis_cfg
+                    )
+                    new_q = sdk.create_query(body=q_body)
+                    
+                    # Update dashboard element
+                    sdk.update_dashboard_element(
+                        dashboard_element_id=str(target_el.id),
+                        body=models40.WriteDashboardElement(
+                            title=new_title,
+                            query_id=new_q.id,
+                            result_maker=models40.WriteResultMakerWithIdVisConfigAndDynamicFields(
+                                vis_config=vis_cfg,
+                                filterables=filterables_list if filterables_list else None
+                            )
+                        )
+                    )
+                    modified_count += 1
+                    log_thought(f"Modified tile '{target_el.title}' ➔ '{new_title}' (Query: {new_q.id})")
+                except Exception as mod_err:
+                    log_thought(f"Warning: Could not modify tile '{target_title}': {mod_err}")
+
+        # 6. Add New Tiles (with smart de-duplication)
+        added_count = 0
+        if add_tiles:
+            dash = sdk.dashboard(clean_id)
+            existing_elements = dash.dashboard_elements or []
+            existing_titles = [el.title.lower().strip() for el in existing_elements if el.title]
+
+            def is_duplicate_tile(new_t: str, existing_list: list) -> bool:
+                import re
+                nt = new_t.lower().strip()
+                if nt in existing_list:
+                    return True
+                clean_nt = re.sub(r'\(.*?\)', '', nt).strip()
+                for ext in existing_list:
+                    clean_ext = re.sub(r'\(.*?\)', '', ext).strip()
+                    if clean_nt == clean_ext or (len(clean_nt) > 4 and clean_nt in clean_ext) or (len(clean_ext) > 4 and clean_ext in clean_nt):
+                        return True
+                return False
+
+            add_tiles_list = _as_list(add_tiles)
+            for idx, raw_tile in enumerate(add_tiles_list):
+                if not isinstance(raw_tile, dict):
+                    if isinstance(raw_tile, str) and raw_tile.strip():
+                        raw_tile = {"title": raw_tile.strip(), "fields": [f"{explore_name}.count"]}
+                    else:
+                        continue
+                tile = raw_tile
+                tile_title = tile.get("title", f"New Metric {idx+1}")
+                if is_duplicate_tile(tile_title, existing_titles):
+                    log_thought(f"Tile '{tile_title}' is already on the dashboard. Skipping duplicate creation.")
+                    continue
+                explore = tile.get("explore") or explore_name
+                raw_fields = tile.get("fields") or []
+                raw_filters = tile.get("filters") or {}
+                sorts = tile.get("sorts") or []
+                limit = str(tile.get("limit", "500"))
+
+                formatted_fields = [resolve_field(f, explore) for f in raw_fields if resolve_field(f, explore)] or [f"{explore}.count"]
+                formatted_filters = {}
+                if isinstance(raw_filters, dict):
+                    for k, v in raw_filters.items():
+                        res_k = resolve_field(k, explore)
+                        if res_k:
+                            formatted_filters[res_k] = str(v).strip("'").strip('"')
+
+                if explore == "events" and not any("event_date" in k for k in formatted_filters.keys()):
+                    formatted_filters[f"{explore}.event_date"] = "30 days"
+
+                formatted_sorts = []
+                for s in sorts:
+                    parts = s.split()
+                    res_col = resolve_field(parts[0], explore)
+                    if res_col:
+                        formatted_sorts.append(f"{res_col}{' ' + parts[1] if len(parts)>1 else ''}")
+
+                vis_type = "looker_grid"
+                if any("date" in f for f in formatted_fields) and len(formatted_fields) >= 2:
+                    vis_type = "looker_line"
+                elif any("country" in f or "game" in f for f in formatted_fields) and len(formatted_fields) >= 2:
+                    vis_type = "looker_column"
+                elif len(formatted_fields) == 1:
+                    vis_type = "single_value"
+
+                vis_config = {
+                    "type": vis_type,
+                    "show_view_names": False,
+                    "show_y_axis_labels": True,
+                    "show_y_axis_ticks": True,
+                    "show_x_axis_label": True,
+                    "show_x_axis_ticks": True,
+                    "legend_position": "center"
+                }
+
+                try:
+                    q_body = models40.WriteQuery(
+                        model=model_name,
+                        view=explore,
+                        fields=formatted_fields,
+                        filters=formatted_filters,
+                        sorts=formatted_sorts,
+                        limit=limit,
+                        vis_config=vis_config
+                    )
+                    q = sdk.create_query(body=q_body)
+                    elem_body = models40.WriteDashboardElement(
+                        dashboard_id=clean_id,
+                        type="vis",
+                        title=tile_title,
+                        query_id=q.id,
+                        result_maker=models40.WriteResultMakerWithIdVisConfigAndDynamicFields(
+                            vis_config=vis_config,
+                            filterables=filterables_list if filterables_list else None
+                        )
+                    )
+                    sdk.create_dashboard_element(body=elem_body)
+                    added_count += 1
+                    log_thought(f"Added new tile '{tile_title}'")
+                except Exception as tile_err:
+                    log_thought(f"Warning: Could not add tile '{tile_title}': {tile_err}")
+
+        # 7. Auto-organize Grid Layout
+        organize_dashboard_layout(sdk, clean_id)
+
+        # Fetch refreshed dashboard metadata
+        dash_final = sdk.dashboard(clean_id)
+        embed_mgr = LookerEmbedManager()
+        target_url = f"{LOOKER_INSTANCE_URI.rstrip('/')}/embed/dashboards/{clean_id}"
+        signed_url = embed_mgr.generate_signed_url(
+            target_url=target_url,
+            user_id="embed_admin",
+            first_name="Gaming",
+            last_name="Analyst"
+        )
+        
+        dashboard_meta = {
+            "id": f"custom_{clean_id}",
+            "looker_id": clean_id,
+            "title": dash_final.title,
+            "description": dash_final.description,
+            "url": f"/embed/dashboards/{clean_id}",
+            "signed_url": signed_url,
+            "icon": "LayoutDashboard",
+            "tiles_count": len(dash_final.dashboard_elements or []),
+            "filters_count": len(dash_final.dashboard_filters or [])
+        }
+        
+        ACTIVE_DASHBOARDS_REGISTRY["latest"] = dashboard_meta
+        if session_id:
+            ACTIVE_DASHBOARDS_REGISTRY[session_id] = dashboard_meta
+        
+        if data_queue:
+            data_queue.put({
+                "type": "dashboard_created",
+                "dashboard": dashboard_meta
+            })
+            
+        return {
+            "status": "success",
+            "message": f"Successfully updated Looker dashboard '{dash_final.title}' (ID: {clean_id}). Added {added_count} tile(s), modified {modified_count} tile(s), removed {deleted_count} tile(s), active tiles: {len(dash_final.dashboard_elements or [])}.",
+            "dashboard_id": clean_id,
+            "dashboard": dashboard_meta,
+            "embed_url": signed_url
+        }
+    except Exception as e:
+        error_msg = f"Failed to edit Looker dashboard: {e}"
+        log_thought(error_msg)
+        return {"status": "error", "error": error_msg}
 
 
 def get_insights(question: str):
@@ -1368,16 +2249,144 @@ def extract_tool_argument(args, param_names, default=""):
         if name in args_dict:
             return args_dict[name]
             
-    if args_dict:
-        return list(args_dict.values())[0]
     return default
 
-def run_deep_analysis(question: str, model_name: str = None):
-    """Runs a deep analysis using a planning agent loop."""
+AVAILABLE_MODELS = [
+    {
+        "id": "gemini-3.6-flash",
+        "name": "Gemini 3.6 Flash",
+        "provider": "Google DeepMind",
+        "badge": "Default",
+        "icon": "Sparkles",
+        "description": "Ultra-fast multimodal reasoning with high-precision tool calling.",
+        "is_default": True
+    },
+    {
+        "id": "qwen3.8-27b",
+        "name": "Qwen 3.8 27B",
+        "provider": "Alibaba Cloud / Open Weights",
+        "badge": "Specialist",
+        "icon": "Cpu",
+        "description": "Specialized open-weights model optimized for coding, Spanner GQL, and data analytics.",
+        "is_default": False
+    },
+    {
+        "id": "gemini-3.5-flash",
+        "name": "Gemini 3.5 Flash",
+        "provider": "Google DeepMind",
+        "badge": "Fast",
+        "icon": "Zap",
+        "description": "Standard low-latency model for high-throughput queries.",
+        "is_default": False
+    },
+    {
+        "id": "gemini-1.5-pro",
+        "name": "Gemini 1.5 Pro",
+        "provider": "Google DeepMind",
+        "badge": "Reasoning",
+        "icon": "Brain",
+        "description": "Deep multi-hop reasoning and long-context synthesis.",
+        "is_default": False
+    },
+    {
+        "id": "qwen2.5-72b",
+        "name": "Qwen 2.5 72B",
+        "provider": "Alibaba Cloud / Open Weights",
+        "badge": "High Capacity",
+        "icon": "Cpu",
+        "description": "High-capacity open model for complex multi-domain intelligence.",
+        "is_default": False
+    }
+]
+
+def resolve_model(model_name: str = None) -> dict:
+    """
+    Resolves requested model name to canonical metadata and backend execution configuration.
+    """
     if not model_name:
-        model_name = os.getenv("DEEP_MODE_MODEL", "gemini-3.5-flash")
+        model_name = os.getenv("DEFAULT_MODEL") or os.getenv("DEEP_MODE_MODEL", "gemini-3.6-flash")
+    
+    clean = str(model_name).lower().strip()
+    if "qwen3.8" in clean or "qwen-3.8" in clean or clean == "qwen" or "qwen3.8-27b" in clean:
+        return {
+            "id": "qwen3.8-27b",
+            "name": "Qwen 3.8 27B",
+            "backend_type": "qwen",
+            "gemini_fallback": "gemini-3.6-flash",
+            "provider": "Alibaba Cloud / Open Weights",
+            "icon": "Cpu",
+            "description": "Specialized open-weights model optimized for coding, Spanner GQL, and data analytics."
+        }
+    elif "qwen2.5" in clean or "qwen-2.5" in clean or "qwen2.5-72b" in clean:
+        return {
+            "id": "qwen2.5-72b",
+            "name": "Qwen 2.5 72B",
+            "backend_type": "qwen",
+            "gemini_fallback": "gemini-3.6-flash",
+            "provider": "Alibaba Cloud / Open Weights",
+            "icon": "Cpu",
+            "description": "High-capacity open model for complex multi-domain intelligence."
+        }
+    elif "1.5-pro" in clean or "gemini-1.5-pro" in clean:
+        return {
+            "id": "gemini-1.5-pro",
+            "name": "Gemini 1.5 Pro",
+            "backend_type": "gemini",
+            "gemini_target": "gemini-1.5-pro",
+            "provider": "Google DeepMind",
+            "icon": "Brain",
+            "description": "Deep multi-hop reasoning and long-context synthesis."
+        }
+    elif "3.5-flash" in clean or "gemini-3.5-flash" in clean:
+        return {
+            "id": "gemini-3.5-flash",
+            "name": "Gemini 3.5 Flash",
+            "backend_type": "gemini",
+            "gemini_target": "gemini-3.5-flash",
+            "provider": "Google DeepMind",
+            "icon": "Zap",
+            "description": "Standard low-latency model for high-throughput queries."
+        }
+    else:
+        return {
+            "id": "gemini-3.6-flash",
+            "name": "Gemini 3.6 Flash",
+            "backend_type": "gemini",
+            "gemini_target": "gemini-3.6-flash",
+            "provider": "Google DeepMind",
+            "icon": "Sparkles",
+            "description": "Ultra-fast multimodal reasoning with high-precision tool calling."
+        }
+
+def create_model_session(model_name: str = None, tools: list = None, tool_config = None, system_instruction: str = ""):
+    """
+    Creates a GenerativeModel session configured for the requested model with persona adaptation.
+    """
+    model_info = resolve_model(model_name)
+    m_name = model_info["name"]
+    
+    augmented_sys_inst = system_instruction or ""
+    if model_info["backend_type"] == "qwen":
+        qwen_directive = f"### LLM BACKEND EMULATION / DIRECTIVE: {m_name}\nYou are {m_name}, an expert open-weights reasoning and analytics engine. Deliver mathematically precise LookML aggregations, accurate Spanner GQL syntax, and clean structured reasoning.\n"
+        augmented_sys_inst = qwen_directive + "\n" + augmented_sys_inst
         
-    log_thought(f"Entering Deep Analysis Mode ({model_name}) - Activating reasoning engine to plan and execute queries across Looker metrics and Spanner Graph...")
+    target_model = model_info.get("gemini_target") or model_info.get("gemini_fallback", "gemini-3.6-flash")
+    
+    kwargs = {}
+    if tools:
+        kwargs["tools"] = tools
+    if tool_config:
+        kwargs["tool_config"] = tool_config
+    if augmented_sys_inst:
+        kwargs["system_instruction"] = augmented_sys_inst
+        
+    model = GenerativeModel(target_model, **kwargs)
+    return model, model_info
+
+def run_deep_analysis(question: str, model_name: str = None, session_id: str = None):
+    """Runs a deep analysis using a planning agent loop."""
+    model_info = resolve_model(model_name)
+    log_thought(f"Entering Deep Analysis Mode [{model_info['name']}] - Activating reasoning engine to plan and execute queries across Looker metrics and Spanner Graph...")
     
     # Define the tool for the LLM
     get_insights_func = FunctionDeclaration(
@@ -1410,7 +2419,144 @@ def run_deep_analysis(question: str, model_name: str = None):
         }
     )
     
-    funcs = [get_insights_func, generate_chart_func]
+    create_looker_dashboard_func = FunctionDeclaration(
+        name="create_looker_dashboard",
+        description="Creates a new custom Looker dashboard on the fly with specified visual tiles, metrics, dimensions, and interactive dashboard-level filters.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "The title of the new dashboard (e.g. 'Season 4 LiveOps War Room', 'Top Spending Whales Analysis')"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Brief description of the dashboard's purpose"
+                },
+                "filters": {
+                    "type": "array",
+                    "description": "List of interactive dashboard-level filters (e.g. [{'name': 'Date Range', 'dimension': 'events.event_date', 'default_value': '30 days'}, {'name': 'Game Title', 'dimension': 'events.game_name'}])",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "Filter display label (e.g. 'Date Range', 'Game Title')"},
+                            "dimension": {"type": "string", "description": "LookML dimension (e.g. 'events.event_date', 'events.game_name', 'events.country')"},
+                            "default_value": {"type": "string", "description": "Default filter value (e.g. '30 days', 'Lookerwood Farm')"}
+                        },
+                        "required": ["name", "dimension"]
+                    }
+                },
+                "tiles": {
+                    "type": "array",
+                    "description": "List of tile configurations to add to the dashboard",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string", "description": "Tile title"},
+                            "explore": {"type": "string", "description": "LookML explore (e.g. 'events', 'gaming_hybrid_search', 'session_facts')"},
+                            "fields": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "List of LookML dimension and measure field names (e.g. ['events.event_date', 'events.number_of_users'])"
+                            },
+                            "filters": {
+                                "type": "object",
+                                "description": "Key-value filter mapping (e.g. {'events.event_date': '30 days', 'events.game_name': 'Lookup Battle Royale'})"
+                            },
+                            "limit": {"type": "string", "description": "Query row limit (default '500')"}
+                        },
+                        "required": ["title", "fields"]
+                    }
+                }
+            },
+            "required": ["title", "tiles"]
+        }
+    )
+
+    edit_looker_dashboard_func = FunctionDeclaration(
+        name="edit_looker_dashboard",
+        description="Edits an existing Looker dashboard in place by adding new tiles, modifying existing tiles (timeframe, chart type, fields), removing tiles, renaming, or adding interactive dashboard filters. Use this whenever the user asks to modify, add to, or refine an existing/recently created dashboard.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "dashboard_id": {
+                    "type": "string",
+                    "description": "The ID of the existing dashboard to edit (e.g. '124' or 'custom_124'). If omitted, automatically modifies the active dashboard."
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Optional new title if renaming the dashboard"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Optional updated description"
+                },
+                "modify_tiles": {
+                    "type": "array",
+                    "description": "List of tile modifications to apply to existing tiles in place (e.g. changing timeframe from 30d to 90d, changing chart type, updating fields).",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "tile_title": {"type": "string", "description": "Current title or substring of the tile to modify"},
+                            "new_title": {"type": "string", "description": "New title for the tile if renaming"},
+                            "timeframe": {"type": "string", "description": "New timeframe filter (e.g. '90 days', '7 days', '30 days')"},
+                            "filters": {"type": "object", "description": "Updated query filters dictionary"},
+                            "fields": {"type": "array", "items": {"type": "string"}, "description": "Updated list of LookML field names"},
+                            "vis_type": {"type": "string", "description": "Visualization type ('looker_line', 'looker_column', 'single_value', 'looker_grid', 'looker_area', 'looker_pie')"}
+                        },
+                        "required": ["tile_title"]
+                    }
+                },
+                "add_tiles": {
+                    "type": "array",
+                    "description": "List of ONLY the brand-new visual tile configurations to append to the dashboard. DO NOT include tiles that already exist on the dashboard.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string", "description": "Tile title"},
+                            "explore": {"type": "string", "description": "LookML explore (e.g. 'events')"},
+                            "fields": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "List of LookML dimension and measure field names"
+                            },
+                            "filters": {
+                                "type": "object",
+                                "description": "Key-value filter mapping"
+                            },
+                            "limit": {"type": "string", "description": "Query row limit"}
+                        },
+                        "required": ["title", "fields"]
+                    }
+                },
+                "delete_tile_titles": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of tile titles or IDs to remove from the dashboard"
+                },
+                "add_filters": {
+                    "type": "array",
+                    "description": "List of interactive dashboard-level filters to add",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "Filter label (e.g. 'Game Title', 'Date Range')"},
+                            "dimension": {"type": "string", "description": "LookML dimension (e.g. 'events.game_name', 'events.event_date')"},
+                            "default_value": {"type": "string", "description": "Default value"}
+                        },
+                        "required": ["name", "dimension"]
+                    }
+                },
+                "delete_filters": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of dashboard filter names or titles to remove from the dashboard (e.g. ['Game Title', 'Date Range'])"
+                }
+            }
+        }
+    )
+    
+    funcs = [get_insights_func, generate_chart_func, create_looker_dashboard_func, edit_looker_dashboard_func]
     
     # Add Spanner tool if configured
     if SPANNER_INSTANCE_ID:
@@ -1433,18 +2579,91 @@ def run_deep_analysis(question: str, model_name: str = None):
 
     analysis_tools = Tool(function_declarations=funcs)
 
-    model = GenerativeModel(
-        model_name,
+    # 1. Resolve Active Dashboard & History from Session
+    import re
+    from conversation_manager import ConversationManager
+    from vertexai.generative_models import Content, Part
+
+    conv_history = []
+    active_dash = None
+    if session_id:
+        active_dash = ACTIVE_DASHBOARDS_REGISTRY.get(session_id)
+        conv_mgr = ConversationManager()
+        raw_msgs = conv_mgr.get_conversation(session_id)
+        
+        # Scan history for active dashboard if not in memory registry
+        if not active_dash:
+            for m in reversed(raw_msgs):
+                text = str(m.get("content", ""))
+                match = re.search(r'/embed/dashboards/(\d+)', text) or re.search(r'Dashboard\s+(?:ID:?\s*)?(\d+)', text, re.IGNORECASE)
+                if match:
+                    found_id = match.group(1)
+                    active_dash = {"looker_id": found_id, "title": f"Dashboard {found_id}"}
+                    ACTIVE_DASHBOARDS_REGISTRY[session_id] = active_dash
+                    ACTIVE_DASHBOARDS_REGISTRY["latest"] = active_dash
+                    break
+
+        # Format past turns into Gemini Content history
+        for m in raw_msgs:
+            if m == raw_msgs[-1] and m.get("role") == "user" and m.get("content") == question:
+                continue
+            role = "user" if m.get("role") == "user" else "model"
+            msg_text = m.get("content", "")
+            if msg_text:
+                conv_history.append(Content(role=role, parts=[Part.from_text(msg_text)]))
+
+    if not active_dash:
+        active_dash = ACTIVE_DASHBOARDS_REGISTRY.get("latest")
+
+    # Ensure Vertex AI has fresh credentials and correct region
+    init_vertex_ai()
+
+    # 2. Inject active dashboard context and capabilities matrix into system instruction
+    base_system_inst = AGENT_CONFIG.get('_computed', {}).get('deep_mode', "You are a Senior Data Analyst.")
+    base_system_inst += """
+
+### DASHBOARD BUILDER CAPABILITIES & BOUNDARIES (STRICT TOOLSET LIMITS):
+You have programmatic access to Looker to build and edit dashboards via `create_looker_dashboard` and `edit_looker_dashboard`.
+
+WHAT YOU CAN DO AUTOMATICALLY:
+1. CREATE DASHBOARDS: Build brand-new dashboards with visual tiles and filters (`create_looker_dashboard`).
+2. ADD NEW TILES: Append new chart or KPI tiles (`edit_looker_dashboard` with `add_tiles`).
+3. MODIFY EXISTING TILES: Update timeframe (e.g. 30d to 90d), filters, fields, or chart visualization types on existing tiles (`edit_looker_dashboard` with `modify_tiles`).
+4. REMOVE TILES: Delete specific tiles by title (`edit_looker_dashboard` with `delete_tile_titles`).
+5. ADD FILTERS: Add interactive dashboard-level filters (`edit_looker_dashboard` with `add_filters`).
+6. REMOVE FILTERS: Delete existing dashboard filters (`edit_looker_dashboard` with `delete_filters`).
+7. RENAME / RE-DESCRIBE: Update dashboard title or description (`edit_looker_dashboard` with `title` or `description`).
+8. AUTOMATIC GRID LAYOUT: The system automatically arranges single-value KPIs across the top (width 4, height 3), main charts in the middle (width 6, height 6), and data tables across the bottom (width 12, height 7).
+
+WHAT YOU CANNOT DO AUTOMATICALLY (NEVER pretend or claim to do these!):
+1. CUSTOM PIXEL-PERFECT DRAG-AND-DROP RESIZING: When a user asks for arbitrary custom pixel dimensions (e.g. 500x300px), explain that the system automatically organizes tiles into an optimal responsive 12-column grid and guide them to click the live dashboard link to drag-and-drop or resize tiles in Looker's visual editor if they want custom sizes.
+2. AD-HOC LOOKML CODE GENERATION: You cannot write new dimension or measure definitions into LookML files (.lkml) on the fly. You can only query existing fields in the model.
+3. CROSS-EXPLORE VISUAL JOINING: Each tile queries one LookML explore.
+
+TRANSPARENCY & HONESTY RULES:
+- Always be completely transparent about what actions you performed using the tools.
+- When an operation is performed (e.g. adding/modifying/removing a tile or filter), state the exact action taken.
+- If a user asks for an unsupported capability (e.g. custom tile layout coordinates), politely explain what the tool can do and provide the direct link to the dashboard for manual UI adjustments.
+"""
+
+    if active_dash:
+        dash_id = active_dash.get("looker_id", "")
+        dash_title = active_dash.get("title", "")
+        dash_tiles = [t.get("title") for t in active_dash.get("tiles", []) if t.get("title")]
+        base_system_inst += f"\n\n### ACTIVE DASHBOARD CONTEXT:\nThe user currently has active Dashboard ID: {dash_id} ('{dash_title}').\nExisting tiles on this dashboard: {dash_tiles}.\nCRITICAL RULES FOR REFINEMENTS / EDITS:\n1. When the user asks to add new tiles to this dashboard, YOU MUST call `edit_looker_dashboard(dashboard_id='{dash_id}', add_tiles=[...])`.\n2. In `add_tiles`, pass ONLY the newly requested tile(s). DO NOT re-send the existing tiles ({dash_tiles}) in `add_tiles`!\n3. When the user asks to modify an existing tile's timeframe, fields, title, or chart type, call `edit_looker_dashboard(dashboard_id='{dash_id}', modify_tiles=[...])`.\n4. When the user asks to remove tiles, pass their titles in `delete_tile_titles`.\n5. When the user asks to remove filters, pass their names in `delete_filters`.\n6. When the user asks to add filters, pass them in `add_filters`.\n7. When the user explicitly requests to create a brand new separate dashboard, call `create_looker_dashboard`."
+
+    model, model_info = create_model_session(
+        model_name=model_name,
         tools=[analysis_tools],
         tool_config=ToolConfig(
             function_calling_config=ToolConfig.FunctionCallingConfig(
                 mode=ToolConfig.FunctionCallingConfig.Mode.AUTO
             )
         ),
-        system_instruction=AGENT_CONFIG.get('_computed', {}).get('deep_mode', "You are a Senior Data Analyst."),
+        system_instruction=base_system_inst,
     )
     
-    chat = model.start_chat()
+    chat = model.start_chat(history=conv_history if conv_history else None)
     intermediate_thoughts = []
     
     try:
@@ -1493,6 +2712,33 @@ def run_deep_analysis(question: str, model_name: str = None):
                         elif fn.name == "generate_chart":
                             data_and_question_arg = extract_tool_argument(fn.args, ["data_and_question"])
                             futures.append(executor.submit(generate_chart_config, data_and_question_arg))
+                        elif fn.name == "create_looker_dashboard":
+                            title_arg = extract_tool_argument(fn.args, ["title"])
+                            desc_arg = extract_tool_argument(fn.args, ["description"], default="")
+                            tiles_arg = extract_tool_argument(fn.args, ["tiles"], default=[])
+                            filters_arg = extract_tool_argument(fn.args, ["filters"], default=[])
+                            futures.append(executor.submit(create_looker_dashboard, title_arg, desc_arg, tiles_arg, filters_arg, session_id))
+                        elif fn.name == "edit_looker_dashboard":
+                            dash_id_arg = extract_tool_argument(fn.args, ["dashboard_id", "id", "dash_id"], default=None)
+                            title_arg = extract_tool_argument(fn.args, ["title"], default=None)
+                            desc_arg = extract_tool_argument(fn.args, ["description"], default=None)
+                            add_tiles_arg = extract_tool_argument(fn.args, ["add_tiles"], default=[])
+                            modify_tiles_arg = extract_tool_argument(fn.args, ["modify_tiles", "update_tiles"], default=[])
+                            del_tiles_arg = extract_tool_argument(fn.args, ["delete_tile_titles", "delete_tiles"], default=[])
+                            add_filters_arg = extract_tool_argument(fn.args, ["add_filters"], default=[])
+                            del_filters_arg = extract_tool_argument(fn.args, ["delete_filters", "delete_filter_names"], default=[])
+                            futures.append(executor.submit(
+                                edit_looker_dashboard,
+                                dashboard_id=dash_id_arg,
+                                title=title_arg,
+                                description=desc_arg,
+                                add_tiles=add_tiles_arg,
+                                modify_tiles=modify_tiles_arg,
+                                delete_tile_titles=del_tiles_arg,
+                                add_filters=add_filters_arg,
+                                delete_filters=del_filters_arg,
+                                session_id=session_id
+                            ))
                         else:
                             log_debug(f"Unknown tool: {fn.name}")
                             futures.append(None)
@@ -1549,6 +2795,8 @@ def run_deep_analysis(question: str, model_name: str = None):
                 full_text = "\n\n".join(intermediate_thoughts) + "\n\n" + full_text
             yield {'content': {'parts': [{'text': full_text}]}}
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         log_thought(f"Deep Analysis Error: {e}")
         full_text = f"An error occurred during deep analysis: {e}"
         if intermediate_thoughts:
@@ -1663,86 +2911,411 @@ def generate_chart_config(data_and_question: str) -> str:
     )
     return response.text
 
-unified_agent = Agent(
-    model="gemini-3.5-flash",
-    name="UnifiedAnalyticsAgent",
-    instruction=AGENT_CONFIG.get('_computed', {}).get('unified_agent', """You are an expert mobile gaming data analyst..."""),
-    tools=[
-        get_insights,
-        query_spanner,
-        perform_deep_analysis,
-
-        # Wrap the sub-agent as a tool
-        agent_tool.AgentTool(agent=visualization_agent)
-    ],
-)
-
-# MCP Agent for Looker Toolbox (create dashboards, analyze LookML, etc.)
-mcp_agent = None
-mcp_app = None
-
-# try:
-#     mcp_toolset = MCPToolset(
-#         connection_params=StdioConnectionParams(
-#             command="./toolbox",
-#             args=["--stdio", "--prebuilt", "looker"],
-#             env={
-#                 "LOOKER_BASE_URL": LOOKER_INSTANCE_URI,
-#                 "LOOKER_CLIENT_ID": LOOKER_CLIENT_ID,
-#                 "LOOKER_CLIENT_SECRET": LOOKER_CLIENT_SECRET,
-#                 "LOOKER_VERIFY_SSL": "true",
-#             }
-#         )
-#     )
+def classify_subagent_route(question: str, history: list = None, active_dash: dict = None) -> dict:
+    """
+    Classifies user question into one of the specialized subagents:
+    - 'dashboard_builder': Looker MCP dashboard creation, editing, tile layout, filter manipulation.
+    - 'social_graph': Spanner Graph queries, Clans, Guilds, Friendships, Social Networks.
+    - 'deep_research': Cross-domain multi-hop analysis combining telemetry metrics and social graph.
+    - 'metrics_fast': Quantitative event metrics, DAU, revenue, retention, ARPU, sessions.
+    """
+    lc = question.lower().strip()
     
-#     mcp_agent = Agent(
-#         model="gemini-3-flash-preview",
-#         name="LookerToolboxAgent",
-#         instruction="""You are a Looker admin assistant with access to Looker Toolbox via MCP.
+    # 1. Dashboard Builder Heuristics (Explicit dashboard management only)
+    dashboard_explicit = [
+        "create dashboard", "build dashboard", "make a dashboard", "new dashboard",
+        "liveops dashboard", "war room", "command center", "add tile", "modify tile",
+        "delete tile", "remove tile", "add a tile", "remove a tile", "delete a tile",
+        "edit dashboard", "update dashboard", "tile layout", "resize tile",
+        "to this dashboard", "on this dashboard", "in the dashboard", "from this dashboard",
+        "to the dashboard", "on the dashboard", "in the dashboard", "from the dashboard",
+        "add a country filter to this dashboard", "add a filter to this dashboard"
+    ]
+    if any(kw in lc for kw in dashboard_explicit):
+        return {
+            "subagent": "dashboard_builder",
+            "name": "Dashboard Architect",
+            "icon": "LayoutDashboard",
+            "description": "Looker MCP LiveOps & Dashboard Builder"
+        }
+    
+    # 2. Deep Research / Cross-domain Heuristics (Multi-hop cross-domain synthesis)
+    social_keywords = ["clan", "guild", "friend", "social", "dragonslayer", "whales", "connections", "network", "titans", "leader", "officer", "member", "gamertag"]
+    has_social = any(w in lc for w in social_keywords)
+    
+    # Check prior history for social context if current query is an ambiguous follow-up
+    if not has_social and history:
+        last_turn_text = ""
+        for msg in reversed(history):
+            if msg.get("role") == "user":
+                last_turn_text = msg.get("content", "").lower()
+                break
+        if any(w in last_turn_text for w in ["clan", "guild", "friend", "social", "dragonslayer", "titans", "gamertag", "spanner"]):
+            if any(w in lc for w in ["who", "leader", "officer", "members", "member", "friend", "connection", "show them", "their", "roster"]):
+                has_social = True
+
+    has_metrics = any(w in lc for w in ["revenue", "dau", "retention", "arpu", "monetization", "spending", "sessions", "installs"])
+    is_investigation = any(w in lc for w in ["analyze the relationship", "investigate", "correlation", "root cause", "deep dive", "compare clan"])
+    
+    if (has_social and has_metrics and is_investigation) or (is_investigation and has_social):
+        return {
+            "subagent": "deep_research",
+            "name": "Deep Research Analyst",
+            "icon": "Brain",
+            "description": "Strategic Cross-Domain Intelligence Specialist"
+        }
         
-# You have access to power tools to interact with Looker:
+    # 3. Social Graph Heuristics (Spanner Graph & Social relationships)
+    if has_social:
+        return {
+            "subagent": "social_graph",
+            "name": "Social Graph Specialist",
+            "icon": "Share2",
+            "description": "Spanner Graph & Clan Intelligence Specialist"
+        }
+        
+    # 4. Metrics Fast Analytics (Default for all quantitative Looker queries, charts, breakdowns, time-series)
+    return {
+        "subagent": "metrics_fast",
+        "name": "Metrics Analyst",
+        "icon": "Zap",
+        "description": "Quantitative Looker Metrics Specialist"
+    }
 
-# **Model & Query Tools:**
-# - get_models, get_explores, get_dimensions, get_measures
-# - query (run queries), query_sql, query_url
 
-# **Content Tools:**
-# - make_dashboard (create dashboards), add_dashboard_element, add_dashboard_filter
-# - make_look (create Looks), run_look, run_dashboard
-# - get_dashboards, get_looks, generate_embed_url
+def run_metrics_subagent(question: str, history: list = None, session_id: str = None, model_name: str = None):
+    """Executes quantitative metrics query using Looker fast query pipeline."""
+    model_info = resolve_model(model_name)
+    log_thought(f"Metrics Analyst [{model_info['name']}]: Executing quantitative Looker metrics query...")
+    has_text = False
+    for chunk in fast_query(question, history=history or []):
+        if chunk.get("type") == "thought":
+            log_thought(chunk.get("content", ""))
+        elif chunk.get("type") == "text":
+            has_text = True
+            yield chunk.get("content", "")
+        elif chunk.get("type") == "data":
+            content = chunk.get("content", {})
+            rows = content.get("rows", [])
+            schema = content.get("schema", {})
+            explore_url = content.get("explore_url", "")
+            
+            # Format markdown table
+            fields = []
+            for f in schema.get("fields", []):
+                fields.append(f.get("display_name") or f.get("name", "").split(".")[-1])
+            if rows and fields:
+                md_table = "\n\n| " + " | ".join(fields) + " |\n| " + " | ".join(["---"] * len(fields)) + " |\n"
+                for r in rows[:25]:
+                    row_vals = []
+                    for f in fields:
+                        val = r.get(f)
+                        if val is None:
+                            for k, v in r.items():
+                                if k.lower().endswith(f.lower()) or f.lower().endswith(k.lower()):
+                                    val = v
+                                    break
+                        row_vals.append(str(val if val is not None else ""))
+                    md_table += "| " + " | ".join(row_vals) + " |\n"
+                has_text = True
+                yield md_table
+                
+            if explore_url:
+                has_text = True
+                yield f"\n\n[📊 Open in Looker Explore]({explore_url})\n"
 
-# **LookML Authoring:**
-# - get_projects, get_project_files, get_project_file
-# - create_project_file, update_project_file, delete_project_file
-# - dev_mode (activate dev mode)
+            if data_queue:
+                q_fields = []
+                for f in schema.get("fields", []):
+                    q_fields.append({
+                        "name": f.get("name"),
+                        "label": f.get("display_name") or f.get("name"),
+                        "type": f.get("type_") or "string"
+                    })
+                if rows:
+                    data_queue.put({
+                        "type": "json_utils",
+                        "data": {
+                            "type": "json_table",
+                            "data": {
+                                "fields": q_fields,
+                                "rows": rows
+                            }
+                        }
+                    })
+                if explore_url:
+                    data_queue.put({
+                        "type": "json_utils",
+                        "data": {
+                            "type": "json_link",
+                            "url": explore_url
+                        }
+                    })
+        elif chunk.get("type") == "chart":
+            if data_queue:
+                data_queue.put({
+                    "type": "json_utils",
+                    "data": {
+                        "type": "json_chart",
+                        "config": chunk.get("content", {})
+                    }
+                })
 
-# **Health Tools:**
-# - health_pulse, health_analyze, health_vacuum
 
-# When asked to create content, use the appropriate tools and return the URL.
-# Always be helpful and explain what you're doing.""",
-#         tools=[mcp_toolset],
-#     )
+def run_social_graph_subagent(question: str, history: list = None, session_id: str = None, model_name: str = None):
+    """Executes Spanner graph queries with bounded schema and automatic graph extraction."""
+    model_info = resolve_model(model_name)
+    log_thought(f"Social Graph Specialist [{model_info['name']}]: Querying Spanner Graph for clan and player network relationships...")
     
-#     mcp_app = reasoning_engines.AdkApp(
-#         agent=mcp_agent,
-#         enable_tracing=False,
-#     )
-#     print("INFO: MCP Looker Toolbox agent initialized successfully")
-# except Exception as e:
-#     print(f"WARNING: Failed to initialize MCP Agent: {e}")
+    sys_inst = AGENT_CONFIG.get('social_graph_analyst', {}).get('system_instruction', '')
+    if not sys_inst:
+        sys_inst = """You are the Social Graph & Clan Intelligence Specialist.
+Query Spanner Graph using `query_spanner(sql)` to answer questions about Clans, Players, Memberships, and Friendships.
+When returning relationship data, use column aliases like `player` and `friend` or `clan_name` and `gamertag` so the system automatically extracts 2D network graphs.
+Accompany graph data with clean markdown summary tables. Always cite *Source: Spanner Graph Database*."""
+        
+    query_spanner_func = FunctionDeclaration(
+        name="query_spanner",
+        description="Executes a SQL or Graph query on Spanner Graph (Players, Clans, ClanMemberships, Friendships).",
+        parameters={
+            "type": "object",
+            "properties": {
+                "sql": {"type": "string", "description": "The Spanner SQL or Graph query to execute."}
+            },
+            "required": ["sql"]
+        }
+    )
+    
+    model, model_info = create_model_session(
+        model_name=model_name,
+        tools=[Tool(function_declarations=[query_spanner_func])],
+        tool_config=ToolConfig(
+            function_calling_config=ToolConfig.FunctionCallingConfig(
+                mode=ToolConfig.FunctionCallingConfig.Mode.AUTO
+            )
+        ),
+        system_instruction=sys_inst
+    )
+    
+    gemini_history = []
+    for msg in (history or []):
+        role = "user" if msg.get("role") == "user" else "model"
+        content = msg.get("content", "")
+        if content:
+            gemini_history.append(Content(role=role, parts=[Part.from_text(content)]))
+            
+    chat = model.start_chat(history=gemini_history)
+    response_stream = retry_api_call(
+        lambda: chat.send_message(question, stream=True),
+        retries=3,
+        delay=2,
+        error_msg="Social graph query failed"
+    )
+    
+    for _ in range(5):
+        function_calls = []
+        text_parts = []
+        for chunk in response_stream:
+            for part in chunk.candidates[0].content.parts:
+                if part.function_call:
+                    function_calls.append(part.function_call)
+                elif part.text:
+                    text_parts.append(part.text)
+                    log_thought(part.text)
+                    
+        if function_calls:
+            tool_responses = []
+            for fn in function_calls:
+                if fn.name == "query_spanner":
+                    sql_arg = extract_tool_argument(fn.args, ["sql"])
+                    res = query_spanner(sql_arg)
+                    tool_responses.append(Part.from_function_response(name=fn.name, response={"content": res}))
+            response_stream = chat.send_message(tool_responses, stream=True)
+        else:
+            final_text = "".join(text_parts).strip()
+            yield final_text
+            break
 
-# vertexai.init is moved to the entry point (chat.py or deploy.py)
-# to avoid hardcoding the staging bucket in the remote environment.
 
-class DeepAnalysisApp:
+def run_dashboard_subagent(question: str, history: list = None, session_id: str = None, model_name: str = None):
+    """Executes Looker dashboard creation, tile modification, and automatic layout."""
+    model_info = resolve_model(model_name)
+    log_thought(f"Dashboard Architect [{model_info['name']}]: Processing Looker dashboard creation / refinement...")
+    for chunk in run_deep_analysis(question, model_name=model_name, session_id=session_id):
+        yield chunk
+
+
+def run_deep_research_subagent(question: str, history: list = None, session_id: str = None, model_name: str = None):
+    """Executes multi-hop strategic analysis across Looker metrics and Spanner graph."""
+    model_info = resolve_model(model_name)
+    log_thought(f"Deep Research Analyst [{model_info['name']}]: Performing cross-domain synthesis across Looker metrics and Spanner graph...")
+    for chunk in run_deep_analysis(question, model_name=model_name, session_id=session_id):
+        yield chunk
+
+
+class RouterAgentApp:
     """
-    Wrapper for Deep Analysis mode to function as an App for server.py.
-    Bypasses the Unified Agent router for lower latency.
+    Intelligent Autonomous Router App that dynamically selects the optimal specialized subagent.
     """
+    def query(self, message: str, user_id: str = None, session_id: str = None, model_name: str = None):
+        """Synchronous query method for Vertex AI Reasoning Engine Execution Service."""
+        os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
+        stream = self.stream_query(message=message, user_id=user_id, session_id=session_id, model_name=model_name)
+        text_parts = []
+        for chunk in stream:
+            if hasattr(chunk, 'text') and chunk.text:
+                text_parts.append(chunk.text)
+            elif isinstance(chunk, dict):
+                if chunk.get("type") == "text":
+                    text_parts.append(chunk.get("content", ""))
+                elif "content" in chunk and isinstance(chunk["content"], dict):
+                    for p in chunk["content"].get("parts", []):
+                        if "text" in p:
+                            text_parts.append(p["text"])
+            elif isinstance(chunk, str):
+                text_parts.append(chunk)
+        return "".join(text_parts).strip()
+
     def stream_query(self, message: str, user_id: str = None, session_id: str = None, model_name: str = None):
-        # Directly invoke the generator
-        return run_deep_analysis(message, model_name=model_name)
+        os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
+        # Load conversation history for multi-turn context
+        history = []
+        if session_id:
+            try:
+                from conversation_manager import conversation_manager
+                raw_conv = conversation_manager.get_conversation(session_id)
+                # The current message was already appended to conversation_manager in server.py,
+                # so previous history is all messages before this pending user query.
+                if raw_conv and raw_conv[-1].get("role") == "user" and raw_conv[-1].get("content") == message:
+                    history = raw_conv[:-1]
+                else:
+                    history = raw_conv
+            except Exception as e:
+                log_debug(f"Could not load conversation history: {e}")
+
+        active_dash = (ACTIVE_DASHBOARDS_REGISTRY.get(session_id) if session_id else None) or ACTIVE_DASHBOARDS_REGISTRY.get("latest")
+        route = classify_subagent_route(message, history=history, active_dash=active_dash)
+        subagent_key = route["subagent"]
+        subagent_name = route["name"]
+        subagent_desc = route["description"]
+        subagent_icon = route["icon"]
+        
+        model_info = resolve_model(model_name)
+        log_thought(f"🧭 Autonomous Router: Identified intent as '{subagent_name}' ({subagent_desc}) using [{model_info['name']}]. Activating specialized pipeline...")
+        
+        if data_queue:
+            try:
+                data_queue.put({
+                    "type": "subagent_routed",
+                    "subagent": subagent_key,
+                    "name": subagent_name,
+                    "description": subagent_desc,
+                    "icon": subagent_icon,
+                    "model": model_info["id"],
+                    "model_name": model_info["name"]
+                })
+            except Exception as e:
+                log_debug(f"Could not emit subagent_routed event: {e}")
+                
+        if subagent_key == "social_graph":
+            yield from run_social_graph_subagent(message, history=history, session_id=session_id, model_name=model_name)
+        elif subagent_key == "dashboard_builder":
+            yield from run_dashboard_subagent(message, history=history, session_id=session_id, model_name=model_name)
+        elif subagent_key == "deep_research":
+            yield from run_deep_research_subagent(message, history=history, session_id=session_id, model_name=model_name)
+        else:
+            yield from run_metrics_subagent(message, history=history, session_id=session_id, model_name=model_name)
+
+    def streaming_agent_run_with_events(self, request_json: str):
+        """
+        Streaming execution entrypoint for Gemini Enterprise (Dolphin / Agentspace).
+        Parses request_json from GE and yields event dictionaries.
+        """
+        os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
+        try:
+            req = json.loads(request_json) if isinstance(request_json, str) else (request_json or {})
+        except Exception:
+            req = {}
+
+        message_data = req.get("message", {})
+        user_text = ""
+        if isinstance(message_data, dict):
+            parts = message_data.get("parts", [])
+            user_text = " ".join([p.get("text", "") for p in parts if isinstance(p, dict) and "text" in p])
+        elif isinstance(message_data, str):
+            user_text = message_data
+        if not user_text:
+            user_text = req.get("prompt") or req.get("question") or ""
+
+        session_id = req.get("session_id") or "ge_session"
+        user_id = req.get("user_id") or "ge_user"
+
+        has_yielded = False
+        stream = self.stream_query(message=user_text, user_id=user_id, session_id=session_id)
+        for chunk in stream:
+            chunk_text = ""
+            if hasattr(chunk, 'text') and chunk.text:
+                chunk_text = chunk.text
+            elif isinstance(chunk, dict):
+                if chunk.get("type") == "text":
+                    chunk_text = chunk.get("content", "")
+                elif chunk.get("type") == "data":
+                    content = chunk.get("content", {})
+                    if content.get("explore_url"):
+                        chunk_text = f"\n\n[📊 Open in Looker Explore]({content.get('explore_url')})\n"
+                elif "content" in chunk and isinstance(chunk["content"], dict):
+                    for p in chunk["content"].get("parts", []):
+                        if "text" in p:
+                            chunk_text += p["text"]
+            elif isinstance(chunk, str):
+                chunk_text = chunk
+
+            if chunk_text:
+                has_yielded = True
+                yield {
+                    "events": [
+                        {
+                            "author": "Gaming Analytics Intelligence",
+                            "content": {
+                                "role": "model",
+                                "parts": [
+                                    {"text": chunk_text}
+                                ]
+                            }
+                        }
+                    ],
+                    "session_id": session_id
+                }
+
+        if not has_yielded:
+            yield {
+                "events": [
+                    {
+                        "author": "Gaming Analytics Intelligence",
+                        "content": {
+                            "role": "model",
+                            "parts": [
+                                {"text": "I analyzed your request against the Looker gaming model and Spanner social graph. Please provide additional details or specify a metric (DAU, revenue, retention) or clan to explore."}
+                            ]
+                        }
+                    }
+                ],
+                "session_id": session_id
+            }
+
+    def agent_run_with_events(self, request_json: str):
+        """Synchronous run with events for Gemini Enterprise."""
+        events = []
+        for event in self.streaming_agent_run_with_events(request_json):
+            events.append(event)
+        return events
+
+    def register_operations(self):
+        """Registers operations for Vertex AI Agent Engine and Gemini Enterprise."""
+        return {
+            "": ["query", "agent_run_with_events", "get_session", "create_session"],
+            "stream": ["stream_query", "streaming_agent_run_with_events"],
+        }
 
     def get_session(self, *args, **kwargs):
         pass
@@ -1750,31 +3323,108 @@ class DeepAnalysisApp:
     def create_session(self, *args, **kwargs):
         pass
 
+
+class DeepAnalysisApp:
+    """
+    Wrapper for Deep Analysis mode to function as an App for server.py and Reasoning Engine.
+    """
+    def query(self, message: str, user_id: str = None, session_id: str = None, model_name: str = None):
+        os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
+        full_text = []
+        for chunk in self.stream_query(message=message, user_id=user_id, session_id=session_id, model_name=model_name):
+            if isinstance(chunk, dict) and "content" in chunk:
+                for part in chunk["content"].get("parts", []):
+                    if "text" in part:
+                        full_text.append(part["text"])
+            elif isinstance(chunk, str):
+                full_text.append(chunk)
+        return "".join(full_text)
+
+    def stream_query(self, message: str, user_id: str = None, session_id: str = None, model_name: str = None):
+        os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
+        yield from run_deep_analysis(message, model_name=model_name, session_id=session_id)
+
+    def streaming_agent_run_with_events(self, request_json: str):
+        os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
+        try:
+            req = json.loads(request_json) if isinstance(request_json, str) else (request_json or {})
+        except Exception:
+            req = {}
+
+        message_data = req.get("message", {})
+        user_text = ""
+        if isinstance(message_data, dict):
+            parts = message_data.get("parts", [])
+            user_text = " ".join([p.get("text", "") for p in parts if isinstance(p, dict) and "text" in p])
+        elif isinstance(message_data, str):
+            user_text = message_data
+        if not user_text:
+            user_text = req.get("prompt") or req.get("question") or ""
+
+        session_id = req.get("session_id") or "ge_session"
+        user_id = req.get("user_id") or "ge_user"
+
+        for chunk in self.stream_query(message=user_text, user_id=user_id, session_id=session_id):
+            chunk_text = ""
+            if isinstance(chunk, dict) and "content" in chunk:
+                for p in chunk["content"].get("parts", []):
+                    if "text" in p:
+                        chunk_text += p["text"]
+            elif isinstance(chunk, str):
+                chunk_text = chunk
+            if chunk_text:
+                yield {
+                    "events": [
+                        {
+                            "author": "Gaming Analytics Intelligence",
+                            "content": {
+                                "role": "model",
+                                "parts": [
+                                    {"text": chunk_text}
+                                ]
+                            }
+                        }
+                    ],
+                    "session_id": session_id
+                }
+
+    def agent_run_with_events(self, request_json: str):
+        events = []
+        for event in self.streaming_agent_run_with_events(request_json):
+            events.append(event)
+        return events
+
+    def register_operations(self):
+        return {
+            "": ["query", "agent_run_with_events", "get_session", "create_session"],
+            "stream": ["stream_query", "streaming_agent_run_with_events"],
+        }
+
+    def get_session(self, *args, **kwargs):
+        pass
+
+    def create_session(self, *args, **kwargs):
+        pass
+
+
+router_app = RouterAgentApp()
 deep_app = DeepAnalysisApp()
+app = router_app
 
-
-# Create the main App (unified agent)
-try:
-    app = reasoning_engines.AdkApp(
-        agent=unified_agent,
-        enable_tracing=False,
-    )
-except Exception as e:
-    print(f"WARNING: Failed to initialize Vertex AI Agent: {e}")
-    # Fallback/Dummy app for when credentials are missing (e.g., in CI/CD or sandbox)
-    class DummyApp:
-        def query(self, *args, **kwargs):
-            return {"output": "Agent could not be initialized due to missing credentials."}
-    app = DummyApp()
-
-# Export both apps for server.py to route between them
-def get_agent_app(agent_type="fast"):
-    """Returns the appropriate agent app based on type."""
-    if agent_type == "mcp" and mcp_app:
-        return mcp_app
-    elif agent_type == "deep":
+def get_agent_app(agent_type="auto"):
+    """Returns the appropriate agent app based on type. Defaults to intelligent RouterApp."""
+    if agent_type == "deep" or agent_type == "mcp":
         return deep_app
-    return app
+    elif agent_type == "fast":
+        # Fast direct metrics
+        class FastApp:
+            def stream_query(self, message: str, user_id: str = None, session_id: str = None, model_name: str = None):
+                return run_metrics_subagent(message, session_id=session_id)
+            def get_session(self, *args, **kwargs): pass
+            def create_session(self, *args, **kwargs): pass
+        return FastApp()
+    return router_app
+
 
 
 def extract_single_number(res):
@@ -2123,26 +3773,49 @@ def generate_daily_summary(force_refresh=False):
                 log_debug(f"Failed to extract JSON substring: {e2}")
         
         if not summary_json:
-            # Simple fallback structure
+            # Data-driven fallback structure
+            br_rev = br_processed['metrics']['revenue']['value']
+            br_iap = br_processed['metrics']['revenue']['iap_value']
+            br_ad = br_processed['metrics']['revenue']['ad_value']
+            farm_rev = farm_processed['metrics']['revenue']['value']
+            farm_iap = farm_processed['metrics']['revenue']['iap_value']
+            farm_ad = farm_processed['metrics']['revenue']['ad_value']
+            br_dau = br_processed['metrics']['dau']['value']
+            farm_dau = farm_processed['metrics']['dau']['value']
+            br_ret = br_processed['metrics']['retention']['value']
+            farm_ret = farm_processed['metrics']['retention']['value']
+
+            fallback_comparison = f"""### Strategic Portfolio Comparison: Lookup Battle Royale vs. Lookerwood Farm
+
+Our two core titles serve distinct operational roles and monetization models across the portfolio. **Lookup Battle Royale** operates as a high-volume, IAP-dominant title (generating **${br_iap:,.0f} IAP vs. ${br_ad:,.0f} Ads**). It drives massive top-of-funnel reach ({br_dau:,.0f} DAU), capitalizing on weekend live-ops and competitive pass purchases, though D1 retention averages **{br_ret:.1f}%**.
+
+In contrast, **Lookerwood Farm** functions as an ad-driven engagement engine (generating **${farm_ad:,.0f} Ads vs. ${farm_iap:,.0f} IAP**). Operating at a steady volume ({farm_dau:,.0f} DAU), it consistently demonstrates stronger retention quality, maintaining a higher D1 retention baseline at **{farm_ret:.1f}%**.
+
+Together, the portfolio benefits from complementary business dynamics: Battle Royale captures high-ARPU conversion spikes during competitive live-ops pushes, while Lookerwood Farm provides predictable, high-retention ad revenue stream stability."""
+
             summary_json = {
-                "game_comparison": "Lookerwood Farm and Lookup Battle Royale comparison.",
+                "game_comparison": fallback_comparison,
                 "overall": {
-                    "executive_summary": "Overall metrics overview.",
-                    "highlights": ["Highlights not generated."],
+                    "executive_summary": f"Overall daily revenue stabilized at ${overall_processed['metrics']['revenue']['value']:,.2f} with {overall_processed['metrics']['dau']['value']:,.0f} active users across both games.",
+                    "highlights": [
+                        f"Aggregate daily portfolio revenue reached ${overall_processed['metrics']['revenue']['value']:,.2f}.",
+                        f"Active users totaled {overall_processed['metrics']['dau']['value']:,.0f} across Lookup Battle Royale and Lookerwood Farm.",
+                        f"Blended Day 1 retention held at {overall_processed['metrics']['retention']['value']:.2f}%."
+                    ],
                     "action_items": [{"text": "Monitor overall performance metrics.", "fields": ["events.event_date", "events.total_revenue"], "filters": {}}],
                     "revenue_mix_trend": {"type": "area", "xAxisKey": "date", "stacked": True, "data": [], "series": [{"name": "IAP Revenue", "dataKey": "iap", "strokeColor": "hsl(var(--primary))", "fillColor": "hsla(var(--primary), 0.3)"}, {"name": "Ad Revenue", "dataKey": "ad", "strokeColor": "hsl(var(--chart-2))", "fillColor": "hsla(var(--chart-2), 0.3)"}], "title": "7-Day Revenue Mix Trend (IAP vs. Ads)"},
                     "dau_retention_trend": {"type": "combo", "xAxisKey": "date", "data": [], "series": [{"type": "bar", "name": "DAU", "dataKey": "dau", "fillColor": "hsla(var(--primary), 0.2)", "strokeColor": "hsl(var(--primary))", "yAxisID": "left"}, {"type": "line", "name": "D1 Retention Rate (%)", "dataKey": "retention", "strokeColor": "hsl(var(--chart-3))", "fillColor": "hsl(var(--chart-3))", "yAxisID": "right"}], "title": "7-Day Active Users & Retention Trend"}
                 },
                 "battle_royale": {
-                    "executive_summary": "Lookup Battle Royale metrics overview.",
-                    "highlights": [],
+                    "executive_summary": f"Lookup Battle Royale generated ${br_rev:,.2f} total revenue with ${br_iap:,.2f} in IAP and {br_dau:,.0f} DAU.",
+                    "highlights": [f"IAP revenue reached ${br_iap:,.2f}.", f"Active players reached {br_dau:,.0f} with D1 retention at {br_ret:.2f}%."],
                     "action_items": [{"text": "Analyze Battle Royale In-App Purchase trends.", "fields": ["events.event_date", "events.total_iap_revenue"], "filters": {"events.game_name": "Lookup Battle Royale"}}],
                     "revenue_mix_trend": {"type": "area", "xAxisKey": "date", "stacked": True, "data": [], "series": [{"name": "IAP Revenue", "dataKey": "iap", "strokeColor": "hsl(var(--primary))", "fillColor": "hsla(var(--primary), 0.3)"}, {"name": "Ad Revenue", "dataKey": "ad", "strokeColor": "hsl(var(--chart-2))", "fillColor": "hsla(var(--chart-2), 0.3)"}], "title": "7-Day Revenue Mix Trend (IAP vs. Ads)"},
                     "dau_retention_trend": {"type": "combo", "xAxisKey": "date", "data": [], "series": [{"type": "bar", "name": "DAU", "dataKey": "dau", "fillColor": "hsla(var(--primary), 0.2)", "strokeColor": "hsl(var(--primary))", "yAxisID": "left"}, {"type": "line", "name": "D1 Retention Rate (%)", "dataKey": "retention", "strokeColor": "hsl(var(--chart-3))", "fillColor": "hsl(var(--chart-3))", "yAxisID": "right"}], "title": "7-Day Active Users & Retention Trend"}
                 },
                 "farm": {
-                    "executive_summary": "Lookerwood Farm metrics overview.",
-                    "highlights": [],
+                    "executive_summary": f"Lookerwood Farm achieved ${farm_rev:,.2f} total revenue (${farm_ad:,.2f} Ads) and superior D1 retention of {farm_ret:.2f}%.",
+                    "highlights": [f"Ad revenue was ${farm_ad:,.2f}.", f"D1 retention reached {farm_ret:.2f}% with {farm_dau:,.0f} active users."],
                     "action_items": [{"text": "Investigate Farm ad network and ad revenue trends.", "fields": ["events.event_date", "events.total_ad_revenue"], "filters": {"events.game_name": "Lookerwood Farm"}}],
                     "revenue_mix_trend": {"type": "area", "xAxisKey": "date", "stacked": True, "data": [], "series": [{"name": "IAP Revenue", "dataKey": "iap", "strokeColor": "hsl(var(--primary))", "fillColor": "hsla(var(--primary), 0.3)"}, {"name": "Ad Revenue", "dataKey": "ad", "strokeColor": "hsl(var(--chart-2))", "fillColor": "hsla(var(--chart-2), 0.3)"}], "title": "7-Day Revenue Mix Trend (IAP vs. Ads)"},
                     "dau_retention_trend": {"type": "combo", "xAxisKey": "date", "data": [], "series": [{"type": "bar", "name": "DAU", "dataKey": "dau", "fillColor": "hsla(var(--primary), 0.2)", "strokeColor": "hsl(var(--primary))", "yAxisID": "left"}, {"type": "line", "name": "D1 Retention Rate (%)", "dataKey": "retention", "strokeColor": "hsl(var(--chart-3))", "fillColor": "hsl(var(--chart-3))", "yAxisID": "right"}], "title": "7-Day Active Users & Retention Trend"}

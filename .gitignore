@@ -9,6 +9,9 @@ inspect_lib_2.py
 
 node_modules/
 frontend/node_modules/
+eval_frontend/node_modules
+eval_frontend/dist/
+*.log
 
 # Conversations folder - track structure but not content
 conversations/*

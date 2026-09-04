@@ -4,8 +4,14 @@
   "description": "This project is a conversational analytics agent that allows users to query their gaming data using natural language. It leverages Google Cloud's Vertex AI and Looker to provide insights, data tables, and visualizations.",
   "main": "get_insights.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "bash ./dev.sh"
+    "start": "bash ./scripts/start_demo.sh",
+    "stop": "bash ./scripts/stop_demo.sh",
+    "restart": "bash ./scripts/restart_demo.sh",
+    "status": "bash ./scripts/status_demo.sh",
+    "dev": "bash ./dev.sh",
+    "start:backend": "./venv/bin/python server.py",
+    "start:frontend": "cd frontend && npm run dev",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
     "type": "git",
@@ -21,5 +27,8 @@
   "dependencies": {
     "@google-cloud/geminidataanalytics": "^0.2.0",
     "dotenv": "^17.2.3"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.6.0"
   }
 }

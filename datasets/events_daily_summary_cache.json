@@ -1,0 +1,510 @@
+{
+  "timestamp": "2026-09-01 14:08:06",
+  "game_comparison": "### Strategic Portfolio Comparison: Lookup Battle Royale vs. Lookerwood Farm\n\nOur two core titles serve distinct operational roles and monetization models across the portfolio. **Lookup Battle Royale** operates as a high-volume, IAP-dominant title (generating **$14.4k IAP vs. $1.7k Ads** on Aug 31). It drives massive top-of-funnel reach (314k DAU), capitalizing on weekend live-ops and competitive pass purchases. However, its monetization is highly volatile and tightly linked to active event cycles, while D1 retention remains relatively modest, averaging between **5.1% and 6.9%**.\n\nIn contrast, **Lookerwood Farm** functions as an ad-driven engagement engine (generating **$11.7k Ads vs. $3.8k IAP** on Aug 31). Operating at a medium volume (119k DAU), it consistently demonstrates stronger retention quality, maintaining a higher D1 retention baseline between **6.0% and 8.2%**. While Lookerwood Farm experienced a sharp post-weekend IAP decay (-49.03%), its ad monetization provided a resilient revenue floor, expanding **+12.47%** day-over-day.\n\nTogether, the portfolio benefits from complementary business dynamics: Battle Royale captures high-ARPU conversion spikes during competitive pushes, while Lookerwood Farm provides predictable, high-retention ad revenue stream stability.",
+  "games": {
+    "overall": {
+      "metrics": {
+        "revenue": {
+          "value": 31583.3694775928,
+          "change": 0.83,
+          "iap_value": 18185.291036800005,
+          "iap_change": -5.65,
+          "ad_value": 13398.078440797326,
+          "ad_change": 11.2
+        },
+        "dau": {
+          "value": 433231.0,
+          "change": -2.15,
+          "new_users_value": 57504.0,
+          "new_users_change": -3.87
+        },
+        "sessions": {
+          "value": 891589.0,
+          "change": -3.29
+        },
+        "retention": {
+          "value": 5.56,
+          "change": -1.71
+        }
+      },
+      "narrative": {
+        "executive_summary": "Overall daily business revenue held stable at **$31,583.37** (+0.83% WoW/DoD), driven by a strong rebound in aggregate ad monetization (+11.20% to $13,398.08) that offset a -5.65% decline in total IAP revenue ($18,185.29). Active engagement contracted modestly as DAU decreased -2.15% to 433,231 and new user installs fell -3.87% to 57,504, reflecting expected post-weekend normalization after peak activity on August 28-29. Day 1 Retention normalized to **5.56%** (-1.71 percentage points). Portfolio health remains solid, though immediate attention is required to stem post-weekend acquisition drop-offs and re-engage converted IAP payers across both titles.",
+        "highlights": [
+          "Total daily portfolio revenue grew +0.83% DoD to $31,583.37, supported by strong ad monetization (+11.20%).",
+          "Overall DAU normalized down -2.15% to 433,231 following the weekend engagement surge.",
+          "Portfolio D1 Retention settled at 5.56% after reaching a weekend high of 7.27% on August 30.",
+          "Ad revenue expansion (+11.20% DoD) successfully offset IAP contraction (-5.65% DoD)."
+        ],
+        "action_items": [
+          {
+            "text": "Audit UA campaign performance across all networks to mitigate post-weekend drop in daily new user acquisition.",
+            "explore_url": "https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app/explore/gaming/events?fields=events.event_date%2Cevents.number_of_new_users%2Cevents.number_of_users&toggle=dat,pik,vis"
+          },
+          {
+            "text": "Review ad network mediation waterfall and floor prices to preserve high eCPMs achieved during the ad revenue surge.",
+            "explore_url": "https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app/explore/gaming/events?fields=events.event_date%2Cevents.total_ad_revenue%2Cevents.total_revenue&toggle=dat,pik,vis"
+          },
+          {
+            "text": "Implement cross-promotional placement within Lookerwood Farm to route highly retained users toward Lookup Battle Royale.",
+            "explore_url": "https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app/explore/gaming/events?fields=events.event_date%2Cevents.game_name%2Cevents.d1_retention_rate%2Cevents.number_of_users&toggle=dat,pik,vis"
+          }
+        ]
+      },
+      "charts": {
+        "revenue_mix": {
+          "type": "area",
+          "xAxisKey": "date",
+          "stacked": true,
+          "data": [
+            {
+              "date": "2026-08-25",
+              "iap": 17386.65,
+              "ad": 13223.33
+            },
+            {
+              "date": "2026-08-26",
+              "iap": 18887.72,
+              "ad": 14019.84
+            },
+            {
+              "date": "2026-08-27",
+              "iap": 22644.68,
+              "ad": 18227.34
+            },
+            {
+              "date": "2026-08-28",
+              "iap": 27349.77,
+              "ad": 18589.64
+            },
+            {
+              "date": "2026-08-29",
+              "iap": 28790.31,
+              "ad": 16728.67
+            },
+            {
+              "date": "2026-08-30",
+              "iap": 19274.08,
+              "ad": 12048.84
+            },
+            {
+              "date": "2026-08-31",
+              "iap": 18185.29,
+              "ad": 13398.08
+            }
+          ],
+          "series": [
+            {
+              "name": "IAP Revenue",
+              "dataKey": "iap",
+              "strokeColor": "hsl(var(--primary))",
+              "fillColor": "hsla(var(--primary), 0.3)"
+            },
+            {
+              "name": "Ad Revenue",
+              "dataKey": "ad",
+              "strokeColor": "hsl(var(--chart-2))",
+              "fillColor": "hsla(var(--chart-2), 0.3)"
+            }
+          ],
+          "title": "7-Day Revenue Mix Trend (IAP vs. Ads)"
+        },
+        "dau_retention": {
+          "type": "combo",
+          "xAxisKey": "date",
+          "data": [
+            {
+              "date": "2026-08-25",
+              "dau": 479077,
+              "retention": 5.36
+            },
+            {
+              "date": "2026-08-26",
+              "dau": 475096,
+              "retention": 5.71
+            },
+            {
+              "date": "2026-08-27",
+              "dau": 516570,
+              "retention": 5.41
+            },
+            {
+              "date": "2026-08-28",
+              "dau": 589247,
+              "retention": 5.41
+            },
+            {
+              "date": "2026-08-29",
+              "dau": 570729,
+              "retention": 7.08
+            },
+            {
+              "date": "2026-08-30",
+              "dau": 442738,
+              "retention": 7.27
+            },
+            {
+              "date": "2026-08-31",
+              "dau": 433231,
+              "retention": 5.56
+            }
+          ],
+          "series": [
+            {
+              "type": "bar",
+              "name": "DAU",
+              "dataKey": "dau",
+              "fillColor": "hsla(var(--primary), 0.2)",
+              "strokeColor": "hsl(var(--primary))",
+              "yAxisID": "left"
+            },
+            {
+              "type": "line",
+              "name": "D1 Retention Rate (%)",
+              "dataKey": "retention",
+              "strokeColor": "hsl(var(--chart-3))",
+              "fillColor": "hsl(var(--chart-3))",
+              "yAxisID": "right"
+            }
+          ],
+          "title": "7-Day Active Users & Retention Trend"
+        }
+      }
+    },
+    "battle_royale": {
+      "metrics": {
+        "revenue": {
+          "value": 16099.23014135916,
+          "change": 19.28,
+          "iap_value": 14402.630163200005,
+          "iap_change": 21.52,
+          "ad_value": 1696.599978158545,
+          "ad_change": 3.15
+        },
+        "dau": {
+          "value": 314079.0,
+          "change": -1.6,
+          "new_users_value": 42408.0,
+          "new_users_change": -2.33
+        },
+        "sessions": {
+          "value": 588440.0,
+          "change": -1.88
+        },
+        "retention": {
+          "value": 5.21,
+          "change": -1.69
+        }
+      },
+      "narrative": {
+        "executive_summary": "Lookup Battle Royale delivered an impressive revenue surge yesterday, reaching **$16,099.23** (+19.28% DoD). This growth was spearheaded by a **+21.52% increase in IAP revenue** ($14,402.63), demonstrating strong monetization conversion from active players. Active volume experienced a light post-weekend correction, with DAU down -1.60% to 314,079 and new users lower by -2.33% to 42,408. Day 1 Retention adjusted to **5.21%** following weekend peaks near 6.90%. The title's strong monetization efficiency (ARPDAU expanded sharply) highlights effective live-ops store bundling, though maintaining audience size will require focused retention initiatives.",
+        "highlights": [
+          "Total revenue rebounded +19.28% DoD to $16,099.23, led by strong IAP sales.",
+          "IAP monetization surged +21.52% DoD to $14,402.63 due to high-value store offers.",
+          "DAU saw minor post-weekend contraction (-1.60% to 314,079).",
+          "D1 Retention adjusted to 5.21% after elevated weekend engagement levels."
+        ],
+        "action_items": [
+          {
+            "text": "Capitalize on strong IAP demand by extending limited-time battle pass flash sales into early week sessions.",
+            "explore_url": "https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app/explore/gaming/events?fields=events.event_date%2Cevents.total_iap_revenue%2Cevents.total_revenue&f%5Bevents.game_name%5D=Lookup+Battle+Royale&toggle=dat,pik,vis"
+          },
+          {
+            "text": "Optimize early player onboarding and tutorial friction to lift baseline D1 retention closer to 6.5%.",
+            "explore_url": "https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app/explore/gaming/events?fields=events.event_date%2Cevents.d1_retention_rate%2Cevents.number_of_new_users&f%5Bevents.game_name%5D=Lookup+Battle+Royale&toggle=dat,pik,vis"
+          },
+          {
+            "text": "Evaluate rewarded ad placement visibility in game lobbies to boost ad monetization alongside core IAP loops.",
+            "explore_url": "https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app/explore/gaming/events?fields=events.event_date%2Cevents.total_ad_revenue%2Cevents.number_of_sesssions&f%5Bevents.game_name%5D=Lookup+Battle+Royale&toggle=dat,pik,vis"
+          }
+        ]
+      },
+      "charts": {
+        "revenue_mix": {
+          "type": "area",
+          "xAxisKey": "date",
+          "stacked": true,
+          "data": [
+            {
+              "date": "2026-08-25",
+              "iap": 13432.59,
+              "ad": 1863.0
+            },
+            {
+              "date": "2026-08-26",
+              "iap": 13007.08,
+              "ad": 1984.96
+            },
+            {
+              "date": "2026-08-27",
+              "iap": 14736.57,
+              "ad": 2358.62
+            },
+            {
+              "date": "2026-08-28",
+              "iap": 18849.6,
+              "ad": 2922.87
+            },
+            {
+              "date": "2026-08-29",
+              "iap": 17611.84,
+              "ad": 2531.96
+            },
+            {
+              "date": "2026-08-30",
+              "iap": 11852.45,
+              "ad": 1644.71
+            },
+            {
+              "date": "2026-08-31",
+              "iap": 14402.63,
+              "ad": 1696.6
+            }
+          ],
+          "series": [
+            {
+              "name": "IAP Revenue",
+              "dataKey": "iap",
+              "strokeColor": "hsl(var(--primary))",
+              "fillColor": "hsla(var(--primary), 0.3)"
+            },
+            {
+              "name": "Ad Revenue",
+              "dataKey": "ad",
+              "strokeColor": "hsl(var(--chart-2))",
+              "fillColor": "hsla(var(--chart-2), 0.3)"
+            }
+          ],
+          "title": "7-Day Revenue Mix Trend (IAP vs. Ads)"
+        },
+        "dau_retention": {
+          "type": "combo",
+          "xAxisKey": "date",
+          "data": [
+            {
+              "date": "2026-08-25",
+              "dau": 349837,
+              "retention": 5.13
+            },
+            {
+              "date": "2026-08-26",
+              "dau": 348316,
+              "retention": 5.61
+            },
+            {
+              "date": "2026-08-27",
+              "dau": 388205,
+              "retention": 5.15
+            },
+            {
+              "date": "2026-08-28",
+              "dau": 448397,
+              "retention": 5.09
+            },
+            {
+              "date": "2026-08-29",
+              "dau": 429754,
+              "retention": 6.75
+            },
+            {
+              "date": "2026-08-30",
+              "dau": 319199,
+              "retention": 6.9
+            },
+            {
+              "date": "2026-08-31",
+              "dau": 314079,
+              "retention": 5.21
+            }
+          ],
+          "series": [
+            {
+              "type": "bar",
+              "name": "DAU",
+              "dataKey": "dau",
+              "fillColor": "hsla(var(--primary), 0.2)",
+              "strokeColor": "hsl(var(--primary))",
+              "yAxisID": "left"
+            },
+            {
+              "type": "line",
+              "name": "D1 Retention Rate (%)",
+              "dataKey": "retention",
+              "strokeColor": "hsl(var(--chart-3))",
+              "fillColor": "hsl(var(--chart-3))",
+              "yAxisID": "right"
+            }
+          ],
+          "title": "7-Day Active Users & Retention Trend"
+        }
+      }
+    },
+    "farm": {
+      "metrics": {
+        "revenue": {
+          "value": 15484.139336233644,
+          "change": -13.14,
+          "iap_value": 3782.660873599999,
+          "iap_change": -49.03,
+          "ad_value": 11701.478462638777,
+          "ad_change": 12.47
+        },
+        "dau": {
+          "value": 119152.0,
+          "change": -3.55,
+          "new_users_value": 15096.0,
+          "new_users_change": -7.97
+        },
+        "sessions": {
+          "value": 303149.0,
+          "change": -5.9
+        },
+        "retention": {
+          "value": 6.5,
+          "change": -1.73
+        }
+      },
+      "narrative": {
+        "executive_summary": "Lookerwood Farm recorded **$15,484.14** in total revenue yesterday (-13.14% DoD). The contraction was heavily influenced by a **-49.03% steep decline in IAP revenue** ($3,782.66) as weekend pack offers expired. However, ad monetization remained very healthy, expanding **+12.47% DoD to $11,701.48** and accounting for 75.6% of the game's total income. Engagement pulled back slightly with DAU down -3.55% to 119,152 and new installs down -7.97% to 15,096. Notably, Lookerwood Farm continues to demonstrate superior player stickiness with D1 Retention at **6.50%**, staying ahead of portfolio benchmarks.",
+        "highlights": [
+          "Ad revenue grew strongly (+12.47% DoD to $11,701.48), providing robust income support.",
+          "IAP revenue contracted -49.03% DoD to $3,782.66 following weekend offer expirations.",
+          "DAU dropped slightly (-3.55% DoD to 119,152) alongside reduced session counts (-5.90%).",
+          "D1 Retention settled at a healthy 6.50%, outperforming Battle Royale retention rates."
+        ],
+        "action_items": [
+          {
+            "text": "Refresh weekday starter kits and resource boost packs to recover post-weekend IAP conversion.",
+            "explore_url": "https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app/explore/gaming/events?fields=events.event_date%2Cevents.total_iap_revenue%2Cevents.total_revenue&f%5Bevents.game_name%5D=Lookerwood+Farm&toggle=dat,pik,vis"
+          },
+          {
+            "text": "Introduce rewarded video ad multipliers on farming harvesting cycles to sustain high ad revenue momentum.",
+            "explore_url": "https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app/explore/gaming/events?fields=events.event_date%2Cevents.total_ad_revenue%2Cevents.number_of_sesssions&f%5Bevents.game_name%5D=Lookerwood+Farm&toggle=dat,pik,vis"
+          },
+          {
+            "text": "Scale targeted ad spend on top-performing acquisition channels to reverse the -7.97% decline in new user installs.",
+            "explore_url": "https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app/explore/gaming/events?fields=events.event_date%2Cevents.number_of_new_users%2Cevents.d1_retention_rate&f%5Bevents.game_name%5D=Lookerwood+Farm&toggle=dat,pik,vis"
+          }
+        ]
+      },
+      "charts": {
+        "revenue_mix": {
+          "type": "area",
+          "xAxisKey": "date",
+          "stacked": true,
+          "data": [
+            {
+              "date": "2026-08-25",
+              "iap": 3954.06,
+              "ad": 11360.33
+            },
+            {
+              "date": "2026-08-26",
+              "iap": 5880.64,
+              "ad": 12034.88
+            },
+            {
+              "date": "2026-08-27",
+              "iap": 7908.11,
+              "ad": 15868.72
+            },
+            {
+              "date": "2026-08-28",
+              "iap": 8500.17,
+              "ad": 15666.77
+            },
+            {
+              "date": "2026-08-29",
+              "iap": 11178.47,
+              "ad": 14196.71
+            },
+            {
+              "date": "2026-08-30",
+              "iap": 7421.63,
+              "ad": 10404.12
+            },
+            {
+              "date": "2026-08-31",
+              "iap": 3782.66,
+              "ad": 11701.48
+            }
+          ],
+          "series": [
+            {
+              "name": "IAP Revenue",
+              "dataKey": "iap",
+              "strokeColor": "hsl(var(--primary))",
+              "fillColor": "hsla(var(--primary), 0.3)"
+            },
+            {
+              "name": "Ad Revenue",
+              "dataKey": "ad",
+              "strokeColor": "hsl(var(--chart-2))",
+              "fillColor": "hsla(var(--chart-2), 0.3)"
+            }
+          ],
+          "title": "7-Day Revenue Mix Trend (IAP vs. Ads)"
+        },
+        "dau_retention": {
+          "type": "combo",
+          "xAxisKey": "date",
+          "data": [
+            {
+              "date": "2026-08-25",
+              "dau": 129240,
+              "retention": 5.97
+            },
+            {
+              "date": "2026-08-26",
+              "dau": 126780,
+              "retention": 5.97
+            },
+            {
+              "date": "2026-08-27",
+              "dau": 128365,
+              "retention": 6.18
+            },
+            {
+              "date": "2026-08-28",
+              "dau": 140850,
+              "retention": 6.42
+            },
+            {
+              "date": "2026-08-29",
+              "dau": 140975,
+              "retention": 8.08
+            },
+            {
+              "date": "2026-08-30",
+              "dau": 123539,
+              "retention": 8.23
+            },
+            {
+              "date": "2026-08-31",
+              "dau": 119152,
+              "retention": 6.5
+            }
+          ],
+          "series": [
+            {
+              "type": "bar",
+              "name": "DAU",
+              "dataKey": "dau",
+              "fillColor": "hsla(var(--primary), 0.2)",
+              "strokeColor": "hsl(var(--primary))",
+              "yAxisID": "left"
+            },
+            {
+              "type": "line",
+              "name": "D1 Retention Rate (%)",
+              "dataKey": "retention",
+              "strokeColor": "hsl(var(--chart-3))",
+              "fillColor": "hsl(var(--chart-3))",
+              "yAxisID": "right"
+            }
+          ],
+          "title": "7-Day Active Users & Retention Trend"
+        }
+      }
+    }
+  }
+}

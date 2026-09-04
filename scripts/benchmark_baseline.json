@@ -1,0 +1,65 @@
+[
+  {
+    "prompt_id": "metrics_1",
+    "category": "METRICS_FAST",
+    "prompt": "What was total revenue by game over the last 30 days?",
+    "elapsed": 0.018154382705688477,
+    "thoughts": [],
+    "side_events": [],
+    "final_text_sample": ""
+  },
+  {
+    "prompt_id": "metrics_2",
+    "category": "METRICS_FAST",
+    "prompt": "Show daily active users trend over the last 7 days.",
+    "elapsed": 0.009235858917236328,
+    "thoughts": [],
+    "side_events": [],
+    "final_text_sample": ""
+  },
+  {
+    "prompt_id": "social_1",
+    "category": "SOCIAL_GRAPH",
+    "prompt": "Who are the members of the DragonSlayers clan?",
+    "elapsed": 0.017653226852416992,
+    "thoughts": [],
+    "side_events": [],
+    "final_text_sample": ""
+  },
+  {
+    "prompt_id": "social_2",
+    "category": "SOCIAL_GRAPH",
+    "prompt": "Show the friendship network and connections for player DragonSlayer_Ace.",
+    "elapsed": 0.007547616958618164,
+    "thoughts": [],
+    "side_events": [],
+    "final_text_sample": ""
+  },
+  {
+    "prompt_id": "dash_1",
+    "category": "DASHBOARD_BUILDER",
+    "prompt": "Build a new LiveOps War Room dashboard with DAU and Total Revenue tiles.",
+    "elapsed": 0.007865190505981445,
+    "thoughts": [],
+    "side_events": [],
+    "final_text_sample": ""
+  },
+  {
+    "prompt_id": "dash_2",
+    "category": "DASHBOARD_BUILDER",
+    "prompt": "Add a Country filter and a single-value KPI for Total IAP Revenue to this dashboard.",
+    "elapsed": 0.009732723236083984,
+    "thoughts": [],
+    "side_events": [],
+    "final_text_sample": ""
+  },
+  {
+    "prompt_id": "deep_1",
+    "category": "DEEP_RESEARCH",
+    "prompt": "Analyze the relationship between top spending whales, their clan memberships, and overall revenue trends.",
+    "elapsed": 0.015345096588134766,
+    "thoughts": [],
+    "side_events": [],
+    "final_text_sample": ""
+  }
+]

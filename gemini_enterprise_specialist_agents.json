@@ -1,0 +1,42 @@
+{
+  "telemetry": {
+    "key": "telemetry",
+    "display_name": "Gaming Telemetry Analyst",
+    "description": "Enterprise AI specialist for Looker quantitative gaming KPI metrics (DAU, MAU, IAP & Ad revenue, D1/D7/D30 retention curves, and ARPU).",
+    "icon": "TrendingUp",
+    "category": "Analytics & BI",
+    "resource_name": "projects/1094200614711/locations/us-central1/reasoningEngines/1658654522186137600",
+    "location": "us-central1",
+    "model": "gemini-3.6-flash"
+  },
+  "social_graph": {
+    "key": "social_graph",
+    "display_name": "Gaming Clan & Social Graph Intelligence",
+    "description": "Enterprise AI specialist for player social graphs, guild hierarchies, clan rosters, officer networks, and whale clusters powered by Spanner ISO GQL.",
+    "icon": "Network",
+    "category": "Social & Community",
+    "resource_name": "projects/1094200614711/locations/us-central1/reasoningEngines/4847203058364448768",
+    "location": "us-central1",
+    "model": "gemini-3.6-flash"
+  },
+  "dashboard_architect": {
+    "key": "dashboard_architect",
+    "display_name": "LiveOps Dashboard Architect",
+    "description": "Enterprise AI specialist for automated Looker dashboard authoring, visual grid layouts, metric tiles, and LiveOps war room creation.",
+    "icon": "LayoutDashboard",
+    "category": "LiveOps & Reporting",
+    "resource_name": "projects/1094200614711/locations/us-central1/reasoningEngines/8536777053087727616",
+    "location": "us-central1",
+    "model": "gemini-3.6-flash"
+  },
+  "embed_manager": {
+    "key": "embed_manager",
+    "display_name": "Gaming SSO Embed & Portal Manager",
+    "description": "Enterprise AI specialist for generating signed Looker Single Sign-On (SSO) embedding URLs for dashboards and war room portals.",
+    "icon": "ShieldCheck",
+    "category": "Security & Embedding",
+    "resource_name": "projects/1094200614711/locations/us-central1/reasoningEngines/9070453608931131392",
+    "location": "us-central1",
+    "model": "gemini-3.6-flash"
+  }
+}

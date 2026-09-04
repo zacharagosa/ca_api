@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useGoogleLogin } from '@react-oauth/google'
-import { Send, Bot, User, Loader2, Code, X, ExternalLink, ChevronDown, ChevronUp, Info, AlertTriangle, LayoutDashboard, MessageSquare, Menu, ChevronRight, Maximize2, Minimize2, LogOut, Zap, Brain, RefreshCw, Square, Sparkles, Trash2, ShieldCheck, BarChart3, Clock } from 'lucide-react'
+import { Send, Bot, User, Loader2, Code, X, ExternalLink, ChevronDown, ChevronUp, Info, AlertTriangle, LayoutDashboard, MessageSquare, Menu, ChevronRight, Maximize2, Minimize2, LogOut, Zap, Brain, RefreshCw, Square, Sparkles, Trash2, ShieldCheck, BarChart3, Clock, Share2, Cpu, Check } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import JSON5 from 'json5'
@@ -486,7 +486,7 @@ function App() {
   const [messages, setMessages] = useState([
     { role: 'agent', content: 'Hello! I am your mobile gaming data analyst. How can I help you today?' }
   ]);
-  const isProduction = !window.location.hostname.includes('localhost');
+  const isProduction = !window.location.hostname.includes('localhost') && !window.location.hostname.includes('127.0.0.1') && !window.location.hostname.includes('.googlers.com');
   const [accessToken, setAccessToken] = useState(
     isProduction ? 'iap_authenticated' : (localStorage.getItem('looker_access_token') || 'local_authenticated')
   );
@@ -502,7 +502,13 @@ function App() {
 
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [agentType, setAgentType] = useState('fast'); // 'fast', 'deep', or 'mcp'
+  const [agentType, setAgentType] = useState('auto'); // 'auto', 'fast', 'deep', or 'mcp'
+  const [activeSubagent, setActiveSubagent] = useState({
+    key: 'auto',
+    name: 'Auto-Routing Engine',
+    icon: 'Sparkles',
+    description: 'Intelligent Intent Dispatcher'
+  });
   const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
   const [isLongQuery, setIsLongQuery] = useState(false);
   const messagesEndRef = useRef(null);
@@ -512,6 +518,67 @@ function App() {
   // State for Deep Test Suite
   const [isTestModalOpen, setIsTestModalOpen] = useState(false);
   const [testLogs, setTestLogs] = useState([]);
+
+  // Model Swapping State
+  const [selectedModel, setSelectedModel] = useState(() => {
+    return localStorage.getItem('looker_agent_model') || 'gemini-3.6-flash';
+  });
+  const [availableModels, setAvailableModels] = useState([
+    {
+      id: "gemini-3.6-flash",
+      name: "Gemini 3.6 Flash",
+      provider: "Google DeepMind",
+      badge: "Default",
+      description: "Ultra-fast multimodal reasoning with high-precision tool calling."
+    },
+    {
+      id: "qwen3.8-27b",
+      name: "Qwen 3.8 27B",
+      provider: "Alibaba Cloud / Open Weights",
+      badge: "Specialist",
+      description: "Specialized open-weights model optimized for coding, Spanner GQL, and data analytics."
+    },
+    {
+      id: "gemini-3.5-flash",
+      name: "Gemini 3.5 Flash",
+      provider: "Google DeepMind",
+      badge: "Fast",
+      description: "Standard low-latency model for high-throughput queries."
+    },
+    {
+      id: "gemini-1.5-pro",
+      name: "Gemini 1.5 Pro",
+      provider: "Google DeepMind",
+      badge: "Reasoning",
+      description: "Deep multi-hop reasoning and long-context synthesis."
+    },
+    {
+      id: "qwen2.5-72b",
+      name: "Qwen 2.5 72B",
+      provider: "Alibaba Cloud / Open Weights",
+      badge: "High Capacity",
+      description: "High-capacity open model for complex multi-domain intelligence."
+    }
+  ]);
+  const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
+
+  // Fetch available models from backend
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/api/models`)
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.models && data.models.length > 0) {
+          setAvailableModels(data.models);
+        }
+      })
+      .catch(err => console.log('Could not fetch models:', err));
+  }, []);
+
+  const handleModelChange = (modelId) => {
+    setSelectedModel(modelId);
+    localStorage.setItem('looker_agent_model', modelId);
+    setIsModelMenuOpen(false);
+  };
   const [isRunningTests, setIsRunningTests] = useState(false);
   const [currentThought, setCurrentThought] = useState(null); // Track live status
 
@@ -536,9 +603,10 @@ function App() {
         if (response.ok) {
           const config = await response.json();
           setDatasetConfig(config);
-          // Set initial dashboard if available
+          // Set initial dashboard to AI Daily Insights if available, or fallback to first
           if (config.dashboards && config.dashboards.length > 0) {
-            setActiveDashboard(config.dashboards[0].id);
+            const hasAiSummary = config.dashboards.some(d => d.id === 'ai_summary');
+            setActiveDashboard(hasAiSummary ? 'ai_summary' : config.dashboards[0].id);
           }
         }
       } catch (e) {
@@ -700,10 +768,20 @@ function App() {
   // Fetch Embed Session when dashboard or token changes
   useEffect(() => {
     const fetchEmbedSession = async () => {
-      if (!activeDashboard || !accessToken || activeDashboard === 'ai_summary' || activeDashboard === 'toxicity_safety' || activeDashboard === 'embedded_explore') return;
+      if (!activeDashboard || !accessToken || activeDashboard === 'ai_summary' || activeDashboard === 'toxicity_safety') return;
 
-      const dashboard = datasetConfig.dashboards.find(d => d.id === activeDashboard);
-      if (!dashboard) return;
+      let dashboard = datasetConfig?.dashboards?.find(d => d.id === activeDashboard);
+      let targetUrl = dashboard?.url;
+      if (!targetUrl) {
+        if (activeDashboard.startsWith('custom_') || activeDashboard.startsWith('dashboard_') || /^\d+$/.test(activeDashboard)) {
+          const rawId = activeDashboard.replace('custom_', '').replace('dashboard_', '');
+          targetUrl = `/embed/dashboards/${rawId}`;
+        } else if (activeDashboard === 'embedded_explore') {
+          targetUrl = '/embed/explore/gaming/events';
+        } else {
+          return;
+        }
+      }
 
       try {
         setEmbedError(null);
@@ -732,8 +810,10 @@ function App() {
           } catch (e) { }
         }
 
+        const normalizedTargetUrl = targetUrl === 'embedded_explore' ? '/embed/explore/gaming/events' : targetUrl;
+
         const requestPayload = {
-          target_url: dashboard.url,
+          target_url: normalizedTargetUrl,
           // Use 'embed_' prefix to ensure we create a distinct embed user
           // and avoid conflicts if the email matches an existing native Looker user.
           user_id: userEmail ? `embed_${userEmail}` : 'embed_guest_user',
@@ -805,10 +885,37 @@ function App() {
   };
 
   const handleLookerLinkClick = async (url) => {
-    // Optimistically set signedUrl to trigger iframe reload or just use the url if signing isn't needed/fails
     setEmbedError(null);
     setSignedUrl(null); // Force reload
-    setActiveDashboard('embedded_explore');
+
+    // Route dashboard URLs to dashboard view and explore URLs to embedded_explore
+    if (url.includes('/dashboards/')) {
+      const match = url.match(/\/dashboards\/([0-9a-zA-Z_]+)/);
+      if (match) {
+        const dashId = match[1];
+        const customId = `custom_${dashId}`;
+        const existing = datasetConfig?.dashboards?.find(d => d.id === customId || d.id === dashId || d.url?.includes(dashId));
+        if (existing) {
+          setActiveDashboard(existing.id);
+        } else {
+          setDatasetConfig(prev => ({
+            ...prev,
+            dashboards: [
+              {
+                id: customId,
+                title: `Custom Dashboard #${dashId}`,
+                url: `/embed/dashboards/${dashId}`,
+                icon: 'LayoutDashboard'
+              },
+              ...(prev?.dashboards || [])
+            ]
+          }));
+          setActiveDashboard(customId);
+        }
+      }
+    } else {
+      setActiveDashboard('embedded_explore');
+    }
 
     console.log('Handling Looker Link Click:', url);
 
@@ -854,6 +961,7 @@ function App() {
       message: userMessage,
       session_id: sessionId,
       agent_type: agentType,
+      model_name: selectedModel,
       force_refresh: options.forceRefresh || false
     }
     console.log('Sending request:', requestPayload)
@@ -1170,6 +1278,36 @@ function App() {
                     return newMessages
                   })
                   continue
+                } else if (jsonContent.type === 'json_dashboard_created') {
+                  const newDash = jsonContent.dashboard;
+                  if (newDash) {
+                    setDatasetConfig(prev => {
+                      const exists = prev.dashboards.some(d => d.id === newDash.id || d.url === newDash.url);
+                      if (exists) {
+                        return {
+                          ...prev,
+                          dashboards: prev.dashboards.map(d => (d.id === newDash.id || d.url === newDash.url) ? { ...d, ...newDash } : d)
+                        };
+                      }
+                      return {
+                        ...prev,
+                        dashboards: [newDash, ...prev.dashboards]
+                      };
+                    });
+                    setActiveDashboard(newDash.id);
+                    if (newDash.signed_url) {
+                      setSignedUrl(newDash.signed_url);
+                    }
+                  }
+                  continue
+                } else if (jsonContent.type === 'subagent_routed') {
+                  setActiveSubagent({
+                    key: jsonContent.subagent || 'auto',
+                    name: jsonContent.name || 'Auto-Routing Engine',
+                    icon: jsonContent.icon || 'Sparkles',
+                    description: jsonContent.description || 'Intelligent Intent Dispatcher'
+                  });
+                  continue;
                 } else if (jsonContent.type === 'query_details') {
                   setMessages(prev => {
                     const newMessages = [...prev]
@@ -1746,6 +1884,78 @@ function App() {
             <h3 className="text-xs font-extrabold text-slate-800 dark:text-white tracking-tight">AI Analytics Assistant</h3>
           </div>
           <div className="flex items-center gap-1.5">
+            {/* Model Selector Dropdown */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsModelMenuOpen(!isModelMenuOpen);
+                  setIsHistoryMenuOpen(false);
+                  setIsTestMenuOpen(false);
+                }}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-[11px] font-semibold text-slate-700 dark:text-slate-200 transition-colors border border-slate-200/80 dark:border-slate-700"
+                title="Swap Underlying AI Model"
+              >
+                <Cpu size={12} className={selectedModel.startsWith('qwen') ? 'text-amber-500' : 'text-blue-500'} />
+                <span className="max-w-[95px] truncate">
+                  {availableModels.find(m => m.id === selectedModel)?.name || selectedModel}
+                </span>
+                <ChevronDown size={11} className="text-slate-400" />
+              </button>
+
+              {isModelMenuOpen && (
+                <div className="absolute right-0 top-full z-50 mt-1.5 w-72 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl p-2 animate-in fade-in zoom-in-95">
+                  <div className="px-2.5 py-1.5 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                    <span>Active AI Model</span>
+                    <span className="text-[9px] text-blue-600 dark:text-blue-400 font-mono">Hot-Swap</span>
+                  </div>
+                  <div className="py-1 space-y-1">
+                    {availableModels.map((m) => {
+                      const isSelected = m.id === selectedModel;
+                      const isQwen = m.id.startsWith('qwen');
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => handleModelChange(m.id)}
+                          className={`w-full px-2.5 py-2 text-left rounded-xl transition-all flex flex-col gap-0.5 ${
+                            isSelected
+                              ? 'bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800'
+                              : 'hover:bg-slate-100 dark:hover:bg-slate-800/80 border border-transparent'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800 dark:text-slate-100">
+                              <Cpu size={13} className={isQwen ? 'text-amber-500' : 'text-blue-500'} />
+                              <span>{m.name}</span>
+                              {isSelected && <Check size={12} className="text-blue-600 dark:text-blue-400 ml-1" />}
+                            </div>
+                            {m.badge && (
+                              <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded-md ${
+                                m.badge === 'Specialist'
+                                  ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+                                  : m.badge === 'Default'
+                                  ? 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300'
+                                  : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                              }`}>
+                                {m.badge}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 line-clamp-2 mt-0.5 leading-snug">
+                            {m.description}
+                          </p>
+                          <div className="text-[9px] text-slate-400 font-mono mt-0.5">
+                            Provider: {m.provider}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* New Chat Button */}
             <Button
               variant="ghost"
@@ -2013,39 +2223,23 @@ function App() {
             >
               <Info size={13} />
             </Button>
-            <Button
-              variant={agentType === 'fast' ? "default" : "secondary"}
-              size="sm"
-              onClick={() => setAgentType('fast')}
-              className={`h-7 text-xs px-3 rounded-full font-semibold ${
-                agentType === 'fast' ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-              }`}
-              title="Fast Mode - Quick answers"
-            >
-              <Zap size={12} className="mr-1" /> Fast
-            </Button>
-            <Button
-              variant={agentType === 'deep' ? "default" : "secondary"}
-              size="sm"
-              onClick={() => setAgentType('deep')}
-              className={`h-7 text-xs px-3 rounded-full font-semibold ${
-                agentType === 'deep' ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-              }`}
-              title="Deep Analysis Mode"
-            >
-              <Brain size={12} className="mr-1" /> Deep
-            </Button>
-            <Button
-              variant={agentType === 'mcp' ? "default" : "secondary"}
-              size="sm"
-              onClick={() => setAgentType('mcp')}
-              className={`h-7 text-xs px-3 rounded-full font-semibold ${
-                agentType === 'mcp' ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-              }`}
-              title="MCP Mode"
-            >
-              <Code size={12} className="mr-1" /> MCP
-            </Button>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-50 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 rounded-full text-xs font-medium text-slate-700 dark:text-slate-200 shadow-sm transition-all animate-fadeIn">
+              {activeSubagent.key === 'social_graph' ? (
+                <Share2 size={13} className="text-purple-500 shrink-0 animate-pulse" />
+              ) : activeSubagent.key === 'dashboard_builder' ? (
+                <LayoutDashboard size={13} className="text-amber-500 shrink-0 animate-pulse" />
+              ) : activeSubagent.key === 'deep_research' ? (
+                <Brain size={13} className="text-blue-600 shrink-0 animate-pulse" />
+              ) : activeSubagent.key === 'metrics_fast' ? (
+                <Zap size={13} className="text-emerald-500 shrink-0 animate-pulse" />
+              ) : (
+                <Sparkles size={13} className="text-indigo-500 shrink-0" />
+              )}
+              <span className="font-semibold text-slate-800 dark:text-slate-100">{activeSubagent.name}</span>
+              <span className="text-[10px] text-slate-400 font-normal hidden sm:inline">
+                • {activeSubagent.description} • <span className="font-semibold text-blue-600 dark:text-blue-400">{availableModels.find(m => m.id === selectedModel)?.name || selectedModel}</span>
+              </span>
+            </div>
           </div>
           <div className="flex w-full items-center space-x-2">
             <Input

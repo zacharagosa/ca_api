@@ -43,6 +43,10 @@ def filter_raw_json_from_text(text: str) -> str:
     pattern2 = r'\{"type":\s*"[^"]*",\s*"sql":.*?"source":\s*"[^"]*"\s*\}'
     filtered = re.sub(pattern2, '', filtered, flags=re.DOTALL)
     
+    # Filter out DATA_PAYLOAD_JSON blobs
+    pattern3 = r'DATA_PAYLOAD_JSON:\s*\{.*?\}'
+    filtered = re.sub(pattern3, '', filtered, flags=re.DOTALL)
+    
     # Clean up any excessive whitespace left behind
     filtered = re.sub(r'\n{3,}', '\n\n', filtered)
     filtered = re.sub(r'^\s+', '', filtered)  # Leading whitespace
@@ -100,7 +104,7 @@ def chat():
     data = request.json
     user_input = data.get('message')
     deep_analysis = data.get('deep_analysis', False)
-    agent_type = data.get('agent_type', 'fast')  # 'fast', 'deep', or 'mcp'
+    agent_type = data.get('agent_type', 'auto')  # 'auto', 'fast', 'deep', or 'mcp'
     user_id = data.get('user_id', 'web_user')
     session_id = data.get('session_id', 'default_session') # Use session_id if provided, else default
     force_refresh = data.get('force_refresh', False)
@@ -156,18 +160,15 @@ def chat():
                 agent.set_access_token(access_token)
 
             try:
-                # Prepend explicit instruction based on user mode (skip for MCP)
                 final_input = user_input
-                if agent_type == 'mcp':
-                    # MCP agent handles the request directly
-                    pass
-                elif agent_type == 'deep':
-                    # Direct routing to Deep Analysis App
+                if agent_type == 'auto':
+                    final_input = user_input
+                elif agent_type == 'mcp' or agent_type == 'deep':
                     final_input = user_input
                 elif deep_analysis:
                     final_input = f"Instruction: PERFORM_DEEP_ANALYSIS. Question: {user_input}"
                 else:
-                    final_input = f"Instruction: FAST_RESPONSE. Question: {user_input}"
+                    final_input = user_input
 
                 # 1. Check Cache (only if not forced)
                 cached_response = None
@@ -244,12 +245,16 @@ def chat():
                 except queue.Empty:
                     pass
 
-                # Check for side-channel data events (e.g. Graph, SQL logs)
+                # Check for side-channel data events (e.g. Graph, SQL logs, Routing)
                 try:
                     while True:
                         data_event = agent.data_queue.get_nowait()
                         if data_event.get("type") == "graph":
                              yield f"DATA: {json.dumps({'type': 'json_graph', 'graphData': data_event['content']})}\n"
+                        elif data_event.get("type") == "dashboard_created":
+                             yield f"DATA: {json.dumps({'type': 'json_dashboard_created', 'dashboard': data_event['dashboard']})}\n"
+                        elif data_event.get("type") == "subagent_routed":
+                             yield f"DATA: {json.dumps({'type': 'subagent_routed', 'subagent': data_event.get('subagent'), 'name': data_event.get('name'), 'icon': data_event.get('icon'), 'description': data_event.get('description')})}\n"
                         elif data_event.get("type") == "json_utils":
                              inner_data = data_event.get('data', {})
                              # Skip query_details - these should not be displayed as text
@@ -487,6 +492,97 @@ def insights():
         print(f"Insights Error: {e}")
         return jsonify({'error': str(e)}), 500
 
+
+@app.route('/api/query', methods=['POST', 'OPTIONS'])
+def api_query():
+    """
+    Synchronous natural language query endpoint for OpenAPI & Gemini Enterprise tool execution.
+    Executes the query via autonomous multi-agent routing and returns structured results.
+    """
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+
+    data = request.get_json(silent=True) or {}
+    question = data.get('question') or data.get('message')
+    if not question:
+        return jsonify({'error': 'No question provided'}), 400
+
+    agent_type = data.get('agent_type', 'auto')
+    session_id = data.get('session_id') or 'ge_session'
+    user_id = data.get('user_id', 'gemini_enterprise_user')
+    model_name = data.get('model_name')
+
+    # Auth header support
+    auth_header = request.headers.get('Authorization')
+    if auth_header and auth_header.startswith('Bearer '):
+        agent.set_access_token(auth_header.split(' ')[1])
+
+    try:
+        active_dash = getattr(agent, 'ACTIVE_DASHBOARDS_REGISTRY', {}).get(session_id) or getattr(agent, 'ACTIVE_DASHBOARDS_REGISTRY', {}).get('latest')
+        route = agent.classify_subagent_route(question, active_dash=active_dash)
+        subagent_key = route.get('subagent', 'metrics_fast')
+        
+        current_agent_app = agent.get_agent_app(agent_type if agent_type != 'auto' else 'auto')
+        
+        kwargs = {'message': question, 'user_id': user_id, 'session_id': session_id}
+        if model_name:
+            kwargs['model_name'] = model_name
+            
+        stream = current_agent_app.stream_query(**kwargs)
+        
+        text_parts = []
+        table_data = None
+        chart_data = None
+        explore_url = None
+        
+        for chunk in stream:
+            if hasattr(chunk, 'text') and chunk.text:
+                text_parts.append(chunk.text)
+            elif isinstance(chunk, dict):
+                chunk_type = chunk.get("type")
+                if chunk_type == "text":
+                    text_parts.append(chunk.get("content", ""))
+                elif chunk_type == "data":
+                    content = chunk.get("content", {})
+                    rows = content.get("rows", [])
+                    schema = content.get("schema", {})
+                    fields = schema.get("fields", [])
+                    if rows and fields:
+                        table_data = {
+                            "fields": [{"name": f.get("name"), "label": f.get("display_name") or f.get("name", "").split(".")[-1]} for f in fields],
+                            "rows": rows
+                        }
+                    if content.get("explore_url"):
+                        explore_url = content.get("explore_url")
+                elif chunk_type == "chart":
+                    chart_data = chunk.get("content")
+                elif "content" in chunk and isinstance(chunk["content"], dict):
+                    for p in chunk["content"].get("parts", []):
+                        if "text" in p:
+                            text_parts.append(p["text"])
+            elif isinstance(chunk, str):
+                text_parts.append(chunk)
+
+        raw_answer = "".join(text_parts).strip()
+        filtered_answer = filter_raw_json_from_text(raw_answer)
+
+        return jsonify({
+            "status": "success",
+            "question": question,
+            "subagent": subagent_key,
+            "subagent_name": route.get("name", "Metrics Analyst"),
+            "answer": filtered_answer or raw_answer,
+            "table_data": table_data,
+            "chart": chart_data,
+            "explore_url": explore_url,
+            "model": model_name or "gemini-3.6-flash"
+        })
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+
 from conversation_manager import ConversationManager
 
 # Initialize Conversation Manager
@@ -591,6 +687,14 @@ def delete_agent(agent_id):
     except Exception as e:
         print(f"Agent Delete Error: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/models', methods=['GET'])
+def get_available_models():
+    """Returns available LLM models for swapping and configuration."""
+    return jsonify({
+        'models': agent.AVAILABLE_MODELS,
+        'default_model': os.getenv('DEFAULT_MODEL', 'gemini-3.6-flash')
+    })
 
 @app.route('/api/dataset-config', methods=['GET'])
 def get_dataset_config():
@@ -1093,6 +1197,7 @@ def generate_narrative():
         return jsonify({'error': 'No prompt provided'}), 400
         
     try:
+        import vertexai
         from vertexai.generative_models import GenerativeModel
         
         # Whitelist/map the model. Only allow gemini-3.5-flash which we know works.
@@ -1104,6 +1209,12 @@ def generate_narrative():
             target_model = "gemini-3.5-flash"
             
         print(f"Generating narrative using Vertex AI model: {target_model}", flush=True)
+        proj = os.getenv("GCP_PROJECT_ID") or os.getenv("PROJECT_ID") or "aragosalooker"
+        loc = os.getenv("VERTEX_LOCATION") or os.getenv("LOCATION") or "global"
+        try:
+            vertexai.init(project=proj, location=loc)
+        except Exception as ve:
+            print(f"Vertex init info: {ve}", flush=True)
         model = GenerativeModel(target_model)
         
         response = model.generate_content(prompt)
@@ -1376,4 +1487,4 @@ if __name__ == '__main__':
     #     else:
     #         print("Server will start, but external API calls might fail if not authenticated.")
 
-    app.run(debug=False, use_reloader=False, host='127.0.0.1', port=8080)
+    app.run(debug=False, use_reloader=False, host='0.0.0.0', port=8080)

@@ -143,6 +143,10 @@ starter_questions:
 
 # Test scenarios for the Scenarios dropdown
 test_scenarios:
+  - label: "LiveOps War Room Builder"
+    question: "Build a new LiveOps War Room dashboard for Season 4 with 3 tiles: Daily Active Users, IAP Revenue by Country, and Session Counts for the last 30 days."
+  - label: "Monetization Audit Builder"
+    question: "Create a Looker dashboard titled 'Whale Monetization Deep Dive' tracking total revenue, top purchasing countries, and ad revenue trends."
   - label: "Toxicity Retention Gap"
     question: "How does exposure to toxic matches impact player Day 1 retention and 7-day LTV spending?"
   - label: "Voice Chat Harassment"
@@ -168,27 +172,31 @@ dashboards:
     title: "AI Daily Insights"
     url: "local_dashboard"
     icon: Sparkles
+  - id: daily_pulse_69
+    title: "Daily Pulse"
+    url: "/embed/dashboards/s7T18I2e8fSSqkD0y8E31C?Date+Range=30+days+ago+for+30+days&Drill+Down=device%5E_platform&Platform=&Install+Source=&Country=&Game=Lookerwood+Farm"
+    icon: Activity
+  - id: hybrid_search_89
+    title: "⚡ BigQuery Hybrid Search: Trust & Safety AI"
+    url: "/embed/dashboards/89"
+    icon: ShieldCheck
+  - id: storyteller_76
+    title: "Gaming Events Storyteller"
+    url: "/embed/dashboards/76"
+    icon: Sparkles
+  - id: monetization_70
+    title: "Game Monetization"
+    url: "/embed/dashboards/70"
+    icon: BarChart3
+  - id: funnel_71
+    title: "Session Funnel"
+    url: "/embed/dashboards/71"
+    icon: Activity
+  - id: embedded_explore
+    title: "Looker Explore Inspector"
+    url: "/embed/explore/gaming/events"
+    icon: ExternalLink
   - id: toxicity_safety
     title: "Player Safety & Anti-Toxicity"
     url: "local_safety_dashboard"
     icon: ShieldCheck
-  - id: overview
-    title: "Game Overview"
-    url: "/embed/dashboards/s7T18I2e8fSSqkD0y8E31C"
-    icon: LayoutDashboard
-  - id: revenue
-    title: "Session Funnel"
-    url: "/embed/dashboards/kacsHESOOkjUBInhOaSbUN"
-    icon: BarChart3
-  - id: retention
-    title: "Game Monetization"
-    url: "/embed/dashboards/dXqsKbYW2Bo3J4HO1yUUd3"
-    icon: Activity
-  - id: embedded_explore
-    title: "Looker Explore Inspector"
-    url: "embedded_explore"
-    icon: ExternalLink
-  - id: gemini
-    title: "Gemini Storyteller"
-    url: "/embed/dashboards/WLbhqbfoeSk60lj3jZDsh1"
-    icon: Activity

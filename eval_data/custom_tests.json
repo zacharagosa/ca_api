@@ -1,0 +1,214 @@
+[
+  {
+    "id": "tc_f701e13a",
+    "category": "metrics_fast",
+    "title": "Retrieve DAU and Total Sessions for iOS and Android Platforms",
+    "description": "Verify that the agent correctly queries Looker metrics to show the number of users (DAU) and total sessions grouped by device platform for iOS and Android.",
+    "difficulty": "intermediate",
+    "prompt": "Can you give me the total number of users and total sessions grouped by device platform for iOS and Android?",
+    "expected_subagent": "metrics_fast",
+    "expected_artifacts": {
+      "table_required": true,
+      "chart_required": false,
+      "graph_required": false,
+      "link_required": true,
+      "dashboard_required": false,
+      "must_contain_keywords": [
+        "device_platform",
+        "number_of_users",
+        "number_of_sesssions"
+      ],
+      "forbidden_keywords": []
+    },
+    "tags": [
+      "metrics",
+      "platform",
+      "dau",
+      "sessions"
+    ],
+    "timeout_seconds": 120
+  },
+  {
+    "id": "tc_8068022c",
+    "category": "metrics_fast",
+    "title": "Compare iOS and Android Engagement Metrics",
+    "description": "Verify the agent can filter metrics specifically for iOS and Android platforms and return number of users and total sessions.",
+    "difficulty": "intermediate",
+    "prompt": "Provide a breakdown of active users and total sessions specifically for the iOS and Android device platforms.",
+    "expected_subagent": "metrics_fast",
+    "expected_artifacts": {
+      "table_required": true,
+      "chart_required": false,
+      "graph_required": false,
+      "link_required": true,
+      "dashboard_required": false,
+      "must_contain_keywords": [
+        "device_platform",
+        "iOS",
+        "Android"
+      ],
+      "forbidden_keywords": []
+    },
+    "tags": [
+      "metrics",
+      "device_platform",
+      "dau",
+      "sessions"
+    ],
+    "timeout_seconds": 120
+  },
+  {
+    "id": "tc_ceff5dfc",
+    "category": "metrics_fast",
+    "title": "Adversarial Future Timeframe and Case-Insensitive Platform Comparison",
+    "description": "Verifies how the metrics engine handles a future date range (2035) and mixed-case platform breakdowns when comparing total revenue and D1 retention between the two games.",
+    "difficulty": "adversarial",
+    "prompt": "Compare total_revenue and d1_retention_rate between 'Lookerwood Farm' and 'Lookup Battle Royale' broken down by device_platform for the future timeframe 2035-01-01 to 2035-12-31. Does the system handle empty future data gracefully?",
+    "expected_subagent": "metrics_fast",
+    "expected_artifacts": {
+      "table_required": true,
+      "chart_required": false,
+      "graph_required": false,
+      "link_required": true,
+      "dashboard_required": false,
+      "must_contain_keywords": [
+        "total_revenue",
+        "d1_retention_rate",
+        "Lookerwood Farm",
+        "Lookup Battle Royale",
+        "device_platform"
+      ],
+      "forbidden_keywords": []
+    },
+    "tags": [
+      "metrics_fast",
+      "adversarial",
+      "timeframe_boundary",
+      "platform_breakdown"
+    ],
+    "timeout_seconds": 120
+  },
+  {
+    "id": "tc_a8b06621",
+    "category": "metrics_fast",
+    "title": "Zero-Duration Microsecond Timeframe with Null Platform Filter",
+    "description": "Tests system stability when querying ARPU and sessions for both games during a zero-duration timeframe with an empty string platform filter.",
+    "difficulty": "adversarial",
+    "prompt": "What is the average_revenue_per_user and number_of_sesssions for both Lookerwood Farm and Lookup Battle Royale on an empty/null device_platform '' for the exact millisecond timeframe between 2023-06-01 12:00:00.000 and 2023-06-01 12:00:00.000?",
+    "expected_subagent": "metrics_fast",
+    "expected_artifacts": {
+      "table_required": true,
+      "chart_required": false,
+      "graph_required": false,
+      "link_required": true,
+      "dashboard_required": false,
+      "must_contain_keywords": [
+        "average_revenue_per_user",
+        "number_of_sesssions",
+        "Lookerwood Farm",
+        "Lookup Battle Royale",
+        "device_platform"
+      ],
+      "forbidden_keywords": []
+    },
+    "tags": [
+      "metrics_fast",
+      "adversarial",
+      "zero_duration",
+      "null_filter"
+    ],
+    "timeout_seconds": 120
+  },
+  {
+    "id": "tc_6e0d36f8",
+    "category": "metrics_fast",
+    "title": "Negative Relative Timeframe with Wildcard Platform Filter",
+    "description": "Evaluates how the system handles a relative timeframe with a negative value ('last -15 days') and wildcarded platform parameters for both target games.",
+    "difficulty": "adversarial",
+    "prompt": "Get total_iap_revenue and total_ad_revenue comparing 'Lookerwood Farm' and 'Lookup Battle Royale' across device_platform values containing 'And%' for the last -15 days. How is this negative relative timeframe parsed?",
+    "expected_subagent": "metrics_fast",
+    "expected_artifacts": {
+      "table_required": true,
+      "chart_required": false,
+      "graph_required": false,
+      "link_required": true,
+      "dashboard_required": false,
+      "must_contain_keywords": [
+        "total_iap_revenue",
+        "total_ad_revenue",
+        "Lookerwood Farm",
+        "Lookup Battle Royale",
+        "device_platform"
+      ],
+      "forbidden_keywords": []
+    },
+    "tags": [
+      "metrics_fast",
+      "adversarial",
+      "negative_timeframe",
+      "wildcard_breakdown"
+    ],
+    "timeout_seconds": 120
+  },
+  {
+    "id": "tc_655cd208",
+    "category": "metrics_fast",
+    "title": "SQL Injection Style Platform Filter and Max Epoch Timeframe",
+    "description": "Verifies SQL injection sanitation and maximum date range limits (1970 to 9999) when comparing total users between the two games.",
+    "difficulty": "adversarial",
+    "prompt": "Compare the number_of_users for 'Lookerwood Farm' and 'Lookup Battle Royale' for the device_platform 'iOS\\'; SELECT *' for the timeframe 1970-01-01 to 9999-12-31. Does the query compile securely and handle the extreme date range?",
+    "expected_subagent": "metrics_fast",
+    "expected_artifacts": {
+      "table_required": true,
+      "chart_required": false,
+      "graph_required": false,
+      "link_required": true,
+      "dashboard_required": false,
+      "must_contain_keywords": [
+        "number_of_users",
+        "Lookerwood Farm",
+        "Lookup Battle Royale",
+        "device_platform"
+      ],
+      "forbidden_keywords": []
+    },
+    "tags": [
+      "metrics_fast",
+      "adversarial",
+      "sql_injection",
+      "max_epoch_timeframe"
+    ],
+    "timeout_seconds": 120
+  },
+  {
+    "id": "tc_b897673a",
+    "category": "metrics_fast",
+    "title": "Ambiguous Date Format Parsing with Non-Existent Device Platform",
+    "description": "Tests how the parser handles an ambiguous '02/11/12' date filter and a non-existent device platform 'SmartFridge' when aggregating revenue and sessions.",
+    "difficulty": "adversarial",
+    "prompt": "Show me total_revenue and number_of_sesssions for Lookerwood Farm versus Lookup Battle Royale on the 'SmartFridge' device_platform for the ambiguous date filter '02/11/12'. How does the agent interpret this date format?",
+    "expected_subagent": "metrics_fast",
+    "expected_artifacts": {
+      "table_required": true,
+      "chart_required": false,
+      "graph_required": false,
+      "link_required": true,
+      "dashboard_required": false,
+      "must_contain_keywords": [
+        "total_revenue",
+        "number_of_sesssions",
+        "Lookerwood Farm",
+        "Lookup Battle Royale",
+        "device_platform"
+      ],
+      "forbidden_keywords": []
+    },
+    "tags": [
+      "metrics_fast",
+      "adversarial",
+      "ambiguous_date",
+      "invalid_platform"
+    ],
+    "timeout_seconds": 120
+  }
+]

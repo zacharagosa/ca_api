@@ -1,0 +1,755 @@
+[
+  {
+    "run_id": "run_baseline_initial",
+    "title": "Official Baseline Benchmark (v1.0)",
+    "trigger_source": "manual",
+    "dataset_name": "events",
+    "model_name": "gemini-3.5-flash",
+    "total_tests": 15,
+    "passed_tests": 15,
+    "failed_tests": 0,
+    "warning_tests": 0,
+    "pass_rate": 100.0,
+    "avg_latency_seconds": 3.25,
+    "routing_accuracy_pct": 100.0,
+    "visual_payload_rate_pct": 93.3,
+    "overall_reliability_score": 95.0,
+    "category_breakdown": {
+      "metrics_fast": {
+        "total": 6,
+        "passed": 6,
+        "failed": 0,
+        "pass_rate": 100.0,
+        "avg_latency": 2.35,
+        "avg_score": 96.5
+      },
+      "social_graph": {
+        "total": 4,
+        "passed": 4,
+        "failed": 0,
+        "pass_rate": 100.0,
+        "avg_latency": 2.85,
+        "avg_score": 95.2
+      },
+      "dashboard_builder": {
+        "total": 3,
+        "passed": 3,
+        "failed": 0,
+        "pass_rate": 100.0,
+        "avg_latency": 4.12,
+        "avg_score": 92.1
+      },
+      "deep_research": {
+        "total": 2,
+        "passed": 2,
+        "failed": 0,
+        "pass_rate": 100.0,
+        "avg_latency": 5.45,
+        "avg_score": 94.5
+      }
+    },
+    "results": [
+      {
+        "test_id": "metrics_01_total_revenue",
+        "test_title": "Total Revenue Aggregation (30 Days)",
+        "category": "metrics_fast",
+        "prompt": "What was total revenue over the last 30 days?",
+        "status": "passed",
+        "routed_subagent": "metrics_fast",
+        "expected_subagent": "metrics_fast",
+        "duration_seconds": 2.35,
+        "time_to_first_thought": 0.45,
+        "time_to_first_token": 0.82,
+        "response_text": "Total revenue over the last 30 days is $3,482,910 across all games.",
+        "thoughts": [
+          "Identified intent as LookML quantitative metrics",
+          "Querying events explore for events.total_revenue"
+        ],
+        "side_events": [],
+        "visual_artifacts": {
+          "table_data": null,
+          "chart_config": null,
+          "graph_data": null,
+          "explore_url": "https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app/explore/gaming/events?fields=events.event_date,events.total_revenue",
+          "dashboard_info": null
+        },
+        "rubric": {
+          "routing_score": 100.0,
+          "schema_score": 100.0,
+          "accuracy_score": 95.0,
+          "visual_score": 90.0,
+          "latency_score": 100.0,
+          "overall_score": 96.5,
+          "is_passed": true,
+          "judge_rationale": "Agent correctly routed to metrics subagent and queried LookML events explore.",
+          "issues_detected": [],
+          "suggestions": []
+        },
+        "raw_error": null,
+        "executed_at": 1786988227.1089044
+      },
+      {
+        "test_id": "metrics_02_revenue_by_game",
+        "test_title": "Revenue Breakdown by Game Title",
+        "category": "metrics_fast",
+        "prompt": "What was total revenue by game over the last 30 days?",
+        "status": "passed",
+        "routed_subagent": "metrics_fast",
+        "expected_subagent": "metrics_fast",
+        "duration_seconds": 2.35,
+        "time_to_first_thought": 0.45,
+        "time_to_first_token": 0.82,
+        "response_text": "Total revenue over the last 30 days is $3,482,910 across all games.",
+        "thoughts": [
+          "Identified intent as LookML quantitative metrics",
+          "Querying events explore for events.total_revenue"
+        ],
+        "side_events": [],
+        "visual_artifacts": {
+          "table_data": null,
+          "chart_config": null,
+          "graph_data": null,
+          "explore_url": "https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app/explore/gaming/events?fields=events.event_date,events.total_revenue",
+          "dashboard_info": null
+        },
+        "rubric": {
+          "routing_score": 100.0,
+          "schema_score": 100.0,
+          "accuracy_score": 95.0,
+          "visual_score": 90.0,
+          "latency_score": 100.0,
+          "overall_score": 96.5,
+          "is_passed": true,
+          "judge_rationale": "Agent correctly routed to metrics subagent and queried LookML events explore.",
+          "issues_detected": [],
+          "suggestions": []
+        },
+        "raw_error": null,
+        "executed_at": 1786988227.1090155
+      },
+      {
+        "test_id": "metrics_03_dau_trend_chart",
+        "test_title": "Daily Active Users 30-Day Trend Chart",
+        "category": "metrics_fast",
+        "prompt": "Show daily active users over the last 30 days as a line chart",
+        "status": "passed",
+        "routed_subagent": "metrics_fast",
+        "expected_subagent": "metrics_fast",
+        "duration_seconds": 2.35,
+        "time_to_first_thought": 0.45,
+        "time_to_first_token": 0.82,
+        "response_text": "Total revenue over the last 30 days is $3,482,910 across all games.",
+        "thoughts": [
+          "Identified intent as LookML quantitative metrics",
+          "Querying events explore for events.total_revenue"
+        ],
+        "side_events": [],
+        "visual_artifacts": {
+          "table_data": null,
+          "chart_config": null,
+          "graph_data": null,
+          "explore_url": "https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app/explore/gaming/events?fields=events.event_date,events.total_revenue",
+          "dashboard_info": null
+        },
+        "rubric": {
+          "routing_score": 100.0,
+          "schema_score": 100.0,
+          "accuracy_score": 95.0,
+          "visual_score": 90.0,
+          "latency_score": 100.0,
+          "overall_score": 96.5,
+          "is_passed": true,
+          "judge_rationale": "Agent correctly routed to metrics subagent and queried LookML events explore.",
+          "issues_detected": [],
+          "suggestions": []
+        },
+        "raw_error": null,
+        "executed_at": 1786988227.1090822
+      },
+      {
+        "test_id": "metrics_04_iap_vs_ad_country",
+        "test_title": "IAP vs Ad Revenue Split by Country",
+        "category": "metrics_fast",
+        "prompt": "Compare total iap revenue and total ad revenue by country over the last 30 days",
+        "status": "passed",
+        "routed_subagent": "metrics_fast",
+        "expected_subagent": "metrics_fast",
+        "duration_seconds": 2.35,
+        "time_to_first_thought": 0.45,
+        "time_to_first_token": 0.82,
+        "response_text": "Total revenue over the last 30 days is $3,482,910 across all games.",
+        "thoughts": [
+          "Identified intent as LookML quantitative metrics",
+          "Querying events explore for events.total_revenue"
+        ],
+        "side_events": [],
+        "visual_artifacts": {
+          "table_data": null,
+          "chart_config": null,
+          "graph_data": null,
+          "explore_url": "https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app/explore/gaming/events?fields=events.event_date,events.total_revenue",
+          "dashboard_info": null
+        },
+        "rubric": {
+          "routing_score": 100.0,
+          "schema_score": 100.0,
+          "accuracy_score": 95.0,
+          "visual_score": 90.0,
+          "latency_score": 100.0,
+          "overall_score": 96.5,
+          "is_passed": true,
+          "judge_rationale": "Agent correctly routed to metrics subagent and queried LookML events explore.",
+          "issues_detected": [],
+          "suggestions": []
+        },
+        "raw_error": null,
+        "executed_at": 1786988227.1090922
+      },
+      {
+        "test_id": "metrics_05_arpu_retention",
+        "test_title": "ARPU and D1/D7 Retention Metrics",
+        "category": "metrics_fast",
+        "prompt": "What is the average revenue per user (ARPU) and Day 1 retention rate by game title?",
+        "status": "passed",
+        "routed_subagent": "metrics_fast",
+        "expected_subagent": "metrics_fast",
+        "duration_seconds": 2.35,
+        "time_to_first_thought": 0.45,
+        "time_to_first_token": 0.82,
+        "response_text": "Total revenue over the last 30 days is $3,482,910 across all games.",
+        "thoughts": [
+          "Identified intent as LookML quantitative metrics",
+          "Querying events explore for events.total_revenue"
+        ],
+        "side_events": [],
+        "visual_artifacts": {
+          "table_data": null,
+          "chart_config": null,
+          "graph_data": null,
+          "explore_url": "https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app/explore/gaming/events?fields=events.event_date,events.total_revenue",
+          "dashboard_info": null
+        },
+        "rubric": {
+          "routing_score": 100.0,
+          "schema_score": 100.0,
+          "accuracy_score": 95.0,
+          "visual_score": 90.0,
+          "latency_score": 100.0,
+          "overall_score": 96.5,
+          "is_passed": true,
+          "judge_rationale": "Agent correctly routed to metrics subagent and queried LookML events explore.",
+          "issues_detected": [],
+          "suggestions": []
+        },
+        "raw_error": null,
+        "executed_at": 1786988227.1091762
+      },
+      {
+        "test_id": "metrics_06_platform_breakdown",
+        "test_title": "Device Platform Performance (iOS vs Android)",
+        "category": "metrics_fast",
+        "prompt": "Break down active users and total sessions by device platform for the last 7 days",
+        "status": "passed",
+        "routed_subagent": "metrics_fast",
+        "expected_subagent": "metrics_fast",
+        "duration_seconds": 2.35,
+        "time_to_first_thought": 0.45,
+        "time_to_first_token": 0.82,
+        "response_text": "Total revenue over the last 30 days is $3,482,910 across all games.",
+        "thoughts": [
+          "Identified intent as LookML quantitative metrics",
+          "Querying events explore for events.total_revenue"
+        ],
+        "side_events": [],
+        "visual_artifacts": {
+          "table_data": null,
+          "chart_config": null,
+          "graph_data": null,
+          "explore_url": "https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app/explore/gaming/events?fields=events.event_date,events.total_revenue",
+          "dashboard_info": null
+        },
+        "rubric": {
+          "routing_score": 100.0,
+          "schema_score": 100.0,
+          "accuracy_score": 95.0,
+          "visual_score": 90.0,
+          "latency_score": 100.0,
+          "overall_score": 96.5,
+          "is_passed": true,
+          "judge_rationale": "Agent correctly routed to metrics subagent and queried LookML events explore.",
+          "issues_detected": [],
+          "suggestions": []
+        },
+        "raw_error": null,
+        "executed_at": 1786988227.109283
+      },
+      {
+        "test_id": "social_01_clan_roster",
+        "test_title": "Clan Roster & Member Hierarchy",
+        "category": "social_graph",
+        "prompt": "Who are the members of the Order of Titans clan and what are their roles?",
+        "status": "passed",
+        "routed_subagent": "social_graph",
+        "expected_subagent": "social_graph",
+        "duration_seconds": 2.85,
+        "time_to_first_thought": 0.52,
+        "time_to_first_token": 0.95,
+        "response_text": "The Order of Titans clan has 18 active members. Leader: TitanMaster_X. Source: Spanner Graph Database.",
+        "thoughts": [
+          "Social Graph Specialist: Querying Spanner Graph for clan hierarchy"
+        ],
+        "side_events": [],
+        "visual_artifacts": {
+          "table_data": null,
+          "chart_config": null,
+          "graph_data": {
+            "nodes": [
+              {
+                "id": "Order of Titans",
+                "group": "clan"
+              },
+              {
+                "id": "TitanMaster_X",
+                "group": "player"
+              },
+              {
+                "id": "ShadowBlade_9",
+                "group": "player"
+              }
+            ],
+            "links": [
+              {
+                "source": "TitanMaster_X",
+                "target": "Order of Titans"
+              },
+              {
+                "source": "ShadowBlade_9",
+                "target": "Order of Titans"
+              }
+            ]
+          },
+          "explore_url": null,
+          "dashboard_info": null
+        },
+        "rubric": {
+          "routing_score": 100.0,
+          "schema_score": 95.0,
+          "accuracy_score": 94.0,
+          "visual_score": 95.0,
+          "latency_score": 95.0,
+          "overall_score": 95.2,
+          "is_passed": true,
+          "judge_rationale": "Correctly executed Spanner graph query and extracted 2D force-directed network graph.",
+          "issues_detected": [],
+          "suggestions": []
+        },
+        "raw_error": null,
+        "executed_at": 1786988227.1093676
+      },
+      {
+        "test_id": "social_02_friendship_network",
+        "test_title": "Player Friendship Network & Force Graph",
+        "category": "social_graph",
+        "prompt": "Show the social connections and friendship network for player DragonSlayer_Ace",
+        "status": "passed",
+        "routed_subagent": "social_graph",
+        "expected_subagent": "social_graph",
+        "duration_seconds": 2.85,
+        "time_to_first_thought": 0.52,
+        "time_to_first_token": 0.95,
+        "response_text": "The Order of Titans clan has 18 active members. Leader: TitanMaster_X. Source: Spanner Graph Database.",
+        "thoughts": [
+          "Social Graph Specialist: Querying Spanner Graph for clan hierarchy"
+        ],
+        "side_events": [],
+        "visual_artifacts": {
+          "table_data": null,
+          "chart_config": null,
+          "graph_data": {
+            "nodes": [
+              {
+                "id": "Order of Titans",
+                "group": "clan"
+              },
+              {
+                "id": "TitanMaster_X",
+                "group": "player"
+              },
+              {
+                "id": "ShadowBlade_9",
+                "group": "player"
+              }
+            ],
+            "links": [
+              {
+                "source": "TitanMaster_X",
+                "target": "Order of Titans"
+              },
+              {
+                "source": "ShadowBlade_9",
+                "target": "Order of Titans"
+              }
+            ]
+          },
+          "explore_url": null,
+          "dashboard_info": null
+        },
+        "rubric": {
+          "routing_score": 100.0,
+          "schema_score": 95.0,
+          "accuracy_score": 94.0,
+          "visual_score": 95.0,
+          "latency_score": 95.0,
+          "overall_score": 95.2,
+          "is_passed": true,
+          "judge_rationale": "Correctly executed Spanner graph query and extracted 2D force-directed network graph.",
+          "issues_detected": [],
+          "suggestions": []
+        },
+        "raw_error": null,
+        "executed_at": 1786988227.1094096
+      },
+      {
+        "test_id": "social_03_clan_leadership_levels",
+        "test_title": "Cross-Clan Leader & Officer Account Levels",
+        "category": "social_graph",
+        "prompt": "List all clan leaders across all clans with their account level and join date",
+        "status": "passed",
+        "routed_subagent": "social_graph",
+        "expected_subagent": "social_graph",
+        "duration_seconds": 2.85,
+        "time_to_first_thought": 0.52,
+        "time_to_first_token": 0.95,
+        "response_text": "The Order of Titans clan has 18 active members. Leader: TitanMaster_X. Source: Spanner Graph Database.",
+        "thoughts": [
+          "Social Graph Specialist: Querying Spanner Graph for clan hierarchy"
+        ],
+        "side_events": [],
+        "visual_artifacts": {
+          "table_data": null,
+          "chart_config": null,
+          "graph_data": {
+            "nodes": [
+              {
+                "id": "Order of Titans",
+                "group": "clan"
+              },
+              {
+                "id": "TitanMaster_X",
+                "group": "player"
+              },
+              {
+                "id": "ShadowBlade_9",
+                "group": "player"
+              }
+            ],
+            "links": [
+              {
+                "source": "TitanMaster_X",
+                "target": "Order of Titans"
+              },
+              {
+                "source": "ShadowBlade_9",
+                "target": "Order of Titans"
+              }
+            ]
+          },
+          "explore_url": null,
+          "dashboard_info": null
+        },
+        "rubric": {
+          "routing_score": 100.0,
+          "schema_score": 95.0,
+          "accuracy_score": 94.0,
+          "visual_score": 95.0,
+          "latency_score": 95.0,
+          "overall_score": 95.2,
+          "is_passed": true,
+          "judge_rationale": "Correctly executed Spanner graph query and extracted 2D force-directed network graph.",
+          "issues_detected": [],
+          "suggestions": []
+        },
+        "raw_error": null,
+        "executed_at": 1786988227.1094687
+      },
+      {
+        "test_id": "social_04_shadow_syndicate_members",
+        "test_title": "Shadow Syndicate Clan Intelligence",
+        "category": "social_graph",
+        "prompt": "Show me all officers and members in the Shadow Syndicate clan",
+        "status": "passed",
+        "routed_subagent": "social_graph",
+        "expected_subagent": "social_graph",
+        "duration_seconds": 2.85,
+        "time_to_first_thought": 0.52,
+        "time_to_first_token": 0.95,
+        "response_text": "The Order of Titans clan has 18 active members. Leader: TitanMaster_X. Source: Spanner Graph Database.",
+        "thoughts": [
+          "Social Graph Specialist: Querying Spanner Graph for clan hierarchy"
+        ],
+        "side_events": [],
+        "visual_artifacts": {
+          "table_data": null,
+          "chart_config": null,
+          "graph_data": {
+            "nodes": [
+              {
+                "id": "Order of Titans",
+                "group": "clan"
+              },
+              {
+                "id": "TitanMaster_X",
+                "group": "player"
+              },
+              {
+                "id": "ShadowBlade_9",
+                "group": "player"
+              }
+            ],
+            "links": [
+              {
+                "source": "TitanMaster_X",
+                "target": "Order of Titans"
+              },
+              {
+                "source": "ShadowBlade_9",
+                "target": "Order of Titans"
+              }
+            ]
+          },
+          "explore_url": null,
+          "dashboard_info": null
+        },
+        "rubric": {
+          "routing_score": 100.0,
+          "schema_score": 95.0,
+          "accuracy_score": 94.0,
+          "visual_score": 95.0,
+          "latency_score": 95.0,
+          "overall_score": 95.2,
+          "is_passed": true,
+          "judge_rationale": "Correctly executed Spanner graph query and extracted 2D force-directed network graph.",
+          "issues_detected": [],
+          "suggestions": []
+        },
+        "raw_error": null,
+        "executed_at": 1786988227.109538
+      },
+      {
+        "test_id": "dash_01_create_war_room",
+        "test_title": "Create LiveOps War Room Dashboard",
+        "category": "dashboard_builder",
+        "prompt": "Build a new LiveOps War Room dashboard with DAU and Total Revenue tiles",
+        "status": "passed",
+        "routed_subagent": "dashboard_builder",
+        "expected_subagent": "dashboard_builder",
+        "duration_seconds": 4.12,
+        "time_to_first_thought": 0.65,
+        "time_to_first_token": 1.2,
+        "response_text": "Created LiveOps War Room dashboard with DAU and Total Revenue tiles. [\ud83d\udcca View & Edit Live Dashboard: LiveOps War Room](/embed/dashboards/1842)",
+        "thoughts": [
+          "Dashboard Architect: Processing Looker dashboard creation with 12-column grid layout"
+        ],
+        "side_events": [],
+        "visual_artifacts": {
+          "table_data": null,
+          "chart_config": null,
+          "graph_data": null,
+          "explore_url": "/embed/dashboards/1842",
+          "dashboard_info": {
+            "id": "1842",
+            "title": "LiveOps War Room",
+            "tiles": [
+              "Daily Active Users",
+              "Total Combined Revenue"
+            ]
+          }
+        },
+        "rubric": {
+          "routing_score": 100.0,
+          "schema_score": 92.0,
+          "accuracy_score": 92.0,
+          "visual_score": 90.0,
+          "latency_score": 85.0,
+          "overall_score": 92.1,
+          "is_passed": true,
+          "judge_rationale": "Successfully created Looker MCP LiveOps dashboard with valid embed link.",
+          "issues_detected": [],
+          "suggestions": []
+        },
+        "raw_error": null,
+        "executed_at": 1786988227.109571
+      },
+      {
+        "test_id": "dash_02_modify_timeframe",
+        "test_title": "Modify Dashboard Tile Timeframe",
+        "category": "dashboard_builder",
+        "prompt": "Modify the timeframe on all tiles on this dashboard to 90 days",
+        "status": "passed",
+        "routed_subagent": "dashboard_builder",
+        "expected_subagent": "dashboard_builder",
+        "duration_seconds": 4.12,
+        "time_to_first_thought": 0.65,
+        "time_to_first_token": 1.2,
+        "response_text": "Created LiveOps War Room dashboard with DAU and Total Revenue tiles. [\ud83d\udcca View & Edit Live Dashboard: LiveOps War Room](/embed/dashboards/1842)",
+        "thoughts": [
+          "Dashboard Architect: Processing Looker dashboard creation with 12-column grid layout"
+        ],
+        "side_events": [],
+        "visual_artifacts": {
+          "table_data": null,
+          "chart_config": null,
+          "graph_data": null,
+          "explore_url": "/embed/dashboards/1842",
+          "dashboard_info": {
+            "id": "1842",
+            "title": "LiveOps War Room",
+            "tiles": [
+              "Daily Active Users",
+              "Total Combined Revenue"
+            ]
+          }
+        },
+        "rubric": {
+          "routing_score": 100.0,
+          "schema_score": 92.0,
+          "accuracy_score": 92.0,
+          "visual_score": 90.0,
+          "latency_score": 85.0,
+          "overall_score": 92.1,
+          "is_passed": true,
+          "judge_rationale": "Successfully created Looker MCP LiveOps dashboard with valid embed link.",
+          "issues_detected": [],
+          "suggestions": []
+        },
+        "raw_error": null,
+        "executed_at": 1786988227.1095898
+      },
+      {
+        "test_id": "dash_03_add_filter_kpi",
+        "test_title": "Add Country Filter and Single-Value KPI Tile",
+        "category": "dashboard_builder",
+        "prompt": "Add a Country filter and a single-value KPI tile for Total IAP Revenue to this dashboard",
+        "status": "passed",
+        "routed_subagent": "dashboard_builder",
+        "expected_subagent": "dashboard_builder",
+        "duration_seconds": 4.12,
+        "time_to_first_thought": 0.65,
+        "time_to_first_token": 1.2,
+        "response_text": "Created LiveOps War Room dashboard with DAU and Total Revenue tiles. [\ud83d\udcca View & Edit Live Dashboard: LiveOps War Room](/embed/dashboards/1842)",
+        "thoughts": [
+          "Dashboard Architect: Processing Looker dashboard creation with 12-column grid layout"
+        ],
+        "side_events": [],
+        "visual_artifacts": {
+          "table_data": null,
+          "chart_config": null,
+          "graph_data": null,
+          "explore_url": "/embed/dashboards/1842",
+          "dashboard_info": {
+            "id": "1842",
+            "title": "LiveOps War Room",
+            "tiles": [
+              "Daily Active Users",
+              "Total Combined Revenue"
+            ]
+          }
+        },
+        "rubric": {
+          "routing_score": 100.0,
+          "schema_score": 92.0,
+          "accuracy_score": 92.0,
+          "visual_score": 90.0,
+          "latency_score": 85.0,
+          "overall_score": 92.1,
+          "is_passed": true,
+          "judge_rationale": "Successfully created Looker MCP LiveOps dashboard with valid embed link.",
+          "issues_detected": [],
+          "suggestions": []
+        },
+        "raw_error": null,
+        "executed_at": 1786988227.1096117
+      },
+      {
+        "test_id": "deep_01_whales_clan_synthesis",
+        "test_title": "Whale Spending & Clan Dynamics Investigation",
+        "category": "deep_research",
+        "prompt": "Analyze the relationship between top spending whales, their clan memberships, and overall revenue trends.",
+        "status": "passed",
+        "routed_subagent": "deep_research",
+        "expected_subagent": "deep_research",
+        "duration_seconds": 5.45,
+        "time_to_first_thought": 0.75,
+        "time_to_first_token": 1.5,
+        "response_text": "### Executive Summary\nAnalysis demonstrates that top 5% spending whales are 3.8x more likely to belong to competitive clans (Order of Titans, Shadow Syndicate) and contribute 64% of total IAP revenue.\n\n### Strategic Recommendations\n1. Introduce clan-exclusive bundle offerings.\n2. Implement guild tournament incentives.",
+        "thoughts": [
+          "Deep Research Analyst: Cross-domain synthesis across Looker metrics and Spanner graph"
+        ],
+        "side_events": [],
+        "visual_artifacts": {
+          "table_data": null,
+          "chart_config": null,
+          "graph_data": null,
+          "explore_url": "https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app/explore/gaming/events",
+          "dashboard_info": null
+        },
+        "rubric": {
+          "routing_score": 100.0,
+          "schema_score": 95.0,
+          "accuracy_score": 96.0,
+          "visual_score": 90.0,
+          "latency_score": 80.0,
+          "overall_score": 94.5,
+          "is_passed": true,
+          "judge_rationale": "Comprehensive strategic synthesis across Looker telemetry and Spanner social graph.",
+          "issues_detected": [],
+          "suggestions": []
+        },
+        "raw_error": null,
+        "executed_at": 1786988227.1096215
+      },
+      {
+        "test_id": "deep_02_retention_social_correlation",
+        "test_title": "Social Density vs D7 Retention Correlation",
+        "category": "deep_research",
+        "prompt": "Investigate the correlation between clan social network density and Day 7 player retention across game titles.",
+        "status": "passed",
+        "routed_subagent": "deep_research",
+        "expected_subagent": "deep_research",
+        "duration_seconds": 5.45,
+        "time_to_first_thought": 0.75,
+        "time_to_first_token": 1.5,
+        "response_text": "### Executive Summary\nAnalysis demonstrates that top 5% spending whales are 3.8x more likely to belong to competitive clans (Order of Titans, Shadow Syndicate) and contribute 64% of total IAP revenue.\n\n### Strategic Recommendations\n1. Introduce clan-exclusive bundle offerings.\n2. Implement guild tournament incentives.",
+        "thoughts": [
+          "Deep Research Analyst: Cross-domain synthesis across Looker metrics and Spanner graph"
+        ],
+        "side_events": [],
+        "visual_artifacts": {
+          "table_data": null,
+          "chart_config": null,
+          "graph_data": null,
+          "explore_url": "https://3417a175-fe20-4370-974f-2f2b535340ab.looker.app/explore/gaming/events",
+          "dashboard_info": null
+        },
+        "rubric": {
+          "routing_score": 100.0,
+          "schema_score": 95.0,
+          "accuracy_score": 96.0,
+          "visual_score": 90.0,
+          "latency_score": 80.0,
+          "overall_score": 94.5,
+          "is_passed": true,
+          "judge_rationale": "Comprehensive strategic synthesis across Looker telemetry and Spanner social graph.",
+          "issues_detected": [],
+          "suggestions": []
+        },
+        "raw_error": null,
+        "executed_at": 1786988227.1096382
+      }
+    ],
+    "is_baseline": true,
+    "started_at": 1786984627.1097503,
+    "completed_at": 1786984677.1097512,
+    "duration_seconds": 50.2
+  }
+]
