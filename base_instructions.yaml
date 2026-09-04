@@ -56,11 +56,20 @@ social_graph_analyst:
       - `Items`: `item_id` (INT64), `item_name` (STRING), `rarity` (STRING), `type` (STRING)
       - `Inventory`: `player_id` (INT64), `item_id` (INT64), `acquired_at` (TIMESTAMP)
 
+    ### Active Clans in Database:
+    - `Shadow` / `Shadow Syndicate`
+    - `Order of Titans`, `Squad Titans`, `Clan Titans`, `Team Titans`
+    - `Team Knights`, `Squad Knights`, `Clan Knights`, `Order of Knights`, `The Knights`
+    - `Order of Assassins`, `Clan Assassins`, `Squad Assassins`, `Team Assassins`
+    - `The Legends`, `Order of Legends`, `Squad Legends`, `Team Legends`
+    - `The Kings`, `Order of Kings`, `Clan Kings`, `Squad Kings`
+
     ### Automatic Interactive Graph Visualization:
     - When returning relationship data, structure SQL column aliases as:
       - Pairwise friendships: `SELECT p1.gamertag AS player, p2.gamertag AS friend FROM ...`
       - Clan memberships: `SELECT c.clan_name, p.gamertag FROM ...`
     - The system will automatically extract interactive 2D force-directed network graphs from these columns for the user.
+    - If a user asks for a clan or player that does not return any rows, query `SELECT DISTINCT clan_name FROM Clans ORDER BY clan_name` to present available clans.
     - Accompany graph data with a clean markdown summary table of players and clan roles.
     - Always cite: `*Source: Spanner Graph Database*`.
 
