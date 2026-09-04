@@ -33,9 +33,16 @@ looker_instructions: |
 
    * Dimensions: events.event_name, events.event_date, events.game_name, events.device_platform, events.country
    * Measures: events.count (to count events), events.number_of_users (to count unique users who did an event),
-     events.total_revenue, events.total_iap_revenue, events.total_ad_revenue
+     events.total_revenue, events.total_iap_revenue, events.total_ad_revenue,
+     events.d1_retention_rate (Day 1 Retention Rate %), events.d7_retention_rate (Day 7 Retention Rate %)
 
   Example Scenarios:
+
+   * User Question: "What is the Day 1 Retention Rate for the past month?"
+       * Correct Query:
+           * Explore: events
+           * Fields: ['events.event_date', 'events.d1_retention_rate']
+           * Filters: {'events.event_date': 'last month'}
 
    * User Question: "How many 'iap_purchase' events happened yesterday for Lookerwood Farm?"
        * Correct Query:
@@ -44,10 +51,6 @@ looker_instructions: |
            * Filters: {'events.event_name': 'iap_purchase', 'events.event_date': 'yesterday', 'events.game_name': 
              'Lookerwood Farm'}
 
-   * User Question: "What was the total ad revenue from players in Germany last week?"
-       * Correct Query:
-           * Explore: events
-           * Fields: ['events.total_ad_revenue']
    * User Question: "What was the total ad revenue from players in Germany last week?"
        * Correct Query:
            * Explore: events
@@ -102,6 +105,12 @@ spanner:
 # GA Feature: Context Authoring — Glossary Terms
 # Business-specific terminology that helps the API understand domain context
 glossary:
+  - term: "Retention Rate"
+    definition: "Day 1 Retention Rate (events.d1_retention_rate) and Day 7 Retention Rate (events.d7_retention_rate) in Looker gaming events. Filter by events.event_date."
+  - term: "Day 1 Retention Rate"
+    definition: "Day 1 Retention Rate (D1 Retention) — the percentage of new users who return on the day after their first session. Directly query measure events.d1_retention_rate from the events explore."
+  - term: "Day 7 Retention Rate"
+    definition: "Day 7 Retention Rate (D7 Retention) — the percentage of new users who return on the 7th day after install. Directly query measure events.d7_retention_rate from the events explore."
   - term: "DAU"
     definition: "Daily Active Users — count of unique users who triggered at least one event on a given day. Use events.number_of_users."
   - term: "D1 Retention"
@@ -124,12 +133,16 @@ glossary:
 # GA Feature: Context Authoring — Verified Questions (Example Queries)
 # Pre-validated question→intent pairs that help the API generate more accurate queries
 verified_questions:
+  - question: "Retention Rate: What is the Day 1 Retention Rate for the past month?"
+    sql: "SELECT events.event_date, events.d1_retention_rate FROM events WHERE events.event_date = 'last month'"
+  - question: "What is the Day 1 Retention Rate for the past month?"
+    sql: "SELECT events.event_date, events.d1_retention_rate FROM events WHERE events.event_date = 'last month'"
+  - question: "What is the Day 1 retention rate for the past month?"
+    sql: "SELECT events.event_date, events.d1_retention_rate FROM events WHERE events.event_date = 'last month'"
   - question: "What was yesterday's total revenue?"
     sql: "SELECT events.total_revenue FROM events WHERE events.event_date = 'yesterday'"
   - question: "How many active users did we have last week?"
     sql: "SELECT events.number_of_users FROM events WHERE events.event_date = 'last week'"
-  - question: "What is the Day 1 retention rate for the past month?"
-    sql: "SELECT events.event_date, events.d1_retention_rate FROM events WHERE events.event_date = 'last month'"
   - question: "Show revenue by game name for the last 7 days"
     sql: "SELECT events.game_name, events.event_date, events.total_revenue FROM events WHERE events.event_date = 'last 7 days'"
   - question: "What was the total ad revenue from players in Germany?"

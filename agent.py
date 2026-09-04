@@ -70,33 +70,63 @@ def load_agent_config():
     def get_inst(section, key='system_instruction'):
         return config.get(section, {}).get(key, '')
 
-    # Build Computed Instructions
-    # 1. Common constraints (Model rules + Analysis rules)
-    common_instruction = get_inst('common', 'model_constraints') + "\n\n" + get_inst('common', 'analysis_rules')
-    
-    # 2. Fast Mode = Common + Fast Mode Operational + Dataset
-    fast_final = f"{common_instruction}\n\n{get_inst('fast_mode')}\n\n{dataset_instruction}"
-    
-    # 3. Deep Mode = Common + Deep Mode Operational + Dataset
-    deep_final = f"{common_instruction}\n\n{get_inst('deep_mode')}\n\n{dataset_instruction}"
-    
-    # 4. Unified Agent (Legacy/Router) = Use existing instruction block but append dataset
-    unified_final = get_inst('unified_agent', 'instruction') + "\n\n" + dataset_instruction
+    # Looker model/explore config
+    looker_config = config.get('_dataset', {}).get('looker', {})
+    model_name = looker_config.get('model') or os.getenv("LOOKML_MODEL", "gaming")
+    explore_name = looker_config.get('explore') or os.getenv("EXPLORE", "events")
+
+    # Build Computed Instructions per Subagent Domain
+    # 1. Fast Mode (Metrics Analyst) = Pure Looker telemetry, strictly NO Spanner / Graph
+    metrics_analyst_base = get_inst('metrics_analyst') or get_inst('fast_mode')
+    fast_final = f"""{metrics_analyst_base}
+
+### DATASET RULES (LOOKER ANALYTICS ONLY)
+{looker_inst or legacy_inst}
+
+### STRICT DOMAIN SCOPE & BOUNDARIES FOR METRICS ANALYST:
+- You are strictly a Quantitative Looker Metrics Specialist querying the LookML '{explore_name}' explore in the '{model_name}' model.
+- You ONLY query Looker event telemetry metrics and dimensions.
+- You DO NOT have access to Google Cloud Spanner, Graph databases, Clans, Guilds, Friendships, or Player Inventories.
+- NEVER attempt to reason about, search for, or query Spanner, SQL Graph (GQL), Clan networks, or player-to-player relationships. All social and clan requests are handled by the separate Social Graph Specialist.
+- For retention queries (e.g. "Day 1 Retention Rate", "Day 7 Retention Rate"):
+  - Directly query the pre-aggregated measure `events.d1_retention_rate` or `events.d7_retention_rate`.
+  - Filter by date on `events.event_date` (e.g. 'last month', '30 days').
+  - Do NOT attempt to calculate player retention through user rosters, graph connections, or Spanner.
+"""
+
+    # 2. Deep Mode (Deep Research Analyst) = Cross-domain synthesis across Looker AND Spanner
+    deep_research_base = get_inst('deep_research_analyst') or get_inst('deep_mode')
+    deep_final = f"""{deep_research_base}
+
+### DATASET RULES (CROSS-DOMAIN LOOKER & SPANNER)
+
+**FOR ANALYTICS (Looker)**:
+{looker_inst}
+
+**FOR GRAPH (Spanner)**:
+{spanner_inst}
+"""
+
+    # 3. Social Graph Analyst = Pure Spanner Graph
+    social_graph_base = get_inst('social_graph_analyst')
+    social_final = f"""{social_graph_base}
+
+### SPANNER GRAPH SCHEMA & RULES
+{spanner_inst}
+"""
+
+    # 4. Unified Agent (Legacy fallback)
+    unified_final = get_inst('unified_agent', 'instruction') + "\n\n" + (looker_inst or legacy_inst)
 
     # Store computed instructions
     config['_computed'] = {
         'fast_mode': fast_final,
         'deep_mode': deep_final,
+        'social_graph': social_final,
         'unified_agent': unified_final
     }
-    print("DEBUG: Final Deep Mode Instruction:\n", deep_final[:500] + "..." + deep_final[-500:])
     
-    # Substitute placeholders in all computed instructions with actual Looker config values
-    looker_config = config.get('_dataset', {}).get('looker', {})
-    model_name = looker_config.get('model') or os.getenv("LOOKML_MODEL", "gaming")
-    explore_name = looker_config.get('explore') or os.getenv("EXPLORE", "events")
-    
-    for key in ['fast_mode', 'deep_mode', 'unified_agent']:
+    for key in ['fast_mode', 'deep_mode', 'social_graph', 'unified_agent']:
         config['_computed'][key] = config['_computed'][key].replace(
             '{LOOKML_MODEL}', model_name
         ).replace(
@@ -3006,8 +3036,15 @@ def run_metrics_subagent(question: str, history: list = None, session_id: str = 
     """Executes quantitative metrics query using Looker fast query pipeline."""
     model_info = resolve_model(model_name)
     log_thought(f"Metrics Analyst [{model_info['name']}]: Executing quantitative Looker metrics query...")
+    
+    # Clean starter question category prefixes (e.g. "Retention Rate: ", "User Overview: ")
+    import re
+    query_to_run = re.sub(r'^(?:Retention Rate|User Overview|Revenue Check|Monetization Check|Session Analysis):\s*', '', question, flags=re.IGNORECASE).strip()
+    if not query_to_run:
+        query_to_run = question
+        
     has_text = False
-    for chunk in fast_query(question, history=history or []):
+    for chunk in fast_query(query_to_run, history=history or []):
         if chunk.get("type") == "thought":
             log_thought(chunk.get("content", ""))
         elif chunk.get("type") == "text":

@@ -36,6 +36,15 @@ metrics_analyst:
       - `events.average_revenue_per_user` (ARPU)
       - `events.average_revenue_per_spender` (ARPPU)
 
+    ### Strict Scope & Boundary Rules:
+    - EXCLUSIVE DOMAIN: You ONLY query Looker (`events` explore in `gaming` model).
+    - NO SPANNER / NO GRAPH ACCESS: You DO NOT have access to Spanner, Graph databases, Clans, Guilds, Friendships, or Player Inventories.
+    - NEVER attempt to reason about, search for, or query Spanner, SQL Graph (GQL), Clan networks, or player-to-player relationships. All social and clan requests are handled by the separate Social Graph Specialist.
+    - RETENTION QUERIES: For retention queries (e.g. "Day 1 Retention Rate", "Day 7 Retention Rate"):
+      - Directly query the pre-aggregated measure `events.d1_retention_rate` or `events.d7_retention_rate`.
+      - Filter by date on `events.event_date` (e.g. 'last month', '30 days').
+      - Do NOT attempt to calculate player retention through user rosters, individual player joins, or graph connections.
+
     ### Output & Formatting Rules:
     - Present numbers clearly with units ($ for revenue, % for retention).
     - Use clean Markdown tables for multi-row data.
