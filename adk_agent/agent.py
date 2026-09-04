@@ -34,12 +34,12 @@ Guidelines:
 PROJECT_ID = os.getenv("PROJECT_ID", "1094200614711")
 
 class GlobalGemini(Gemini):
-    """Custom Gemini LLM provider targeting the global Vertex AI endpoint for Gemini 3.6 Flash."""
+    """Custom Gemini LLM provider targeting the global Vertex AI endpoint for Gemini 3.8 Flash."""
     @cached_property
     def api_client(self) -> Client:
         return Client(vertexai=True, project=PROJECT_ID, location="global")
 
-my_llm = GlobalGemini(model="gemini-3.6-flash")
+my_llm = GlobalGemini(model="gemini-3.8-flash")
 
 root_agent = llm_agent.LlmAgent(
     name="Gaming_Analytics_Intelligence",

@@ -2253,13 +2253,22 @@ def extract_tool_argument(args, param_names, default=""):
 
 AVAILABLE_MODELS = [
     {
-        "id": "gemini-3.6-flash",
-        "name": "Gemini 3.6 Flash",
+        "id": "gemini-3.8-flash",
+        "name": "Gemini 3.8 Flash",
         "provider": "Google DeepMind",
         "badge": "Default",
         "icon": "Sparkles",
-        "description": "Ultra-fast multimodal reasoning with high-precision tool calling.",
+        "description": "Next-gen ultra-fast multimodal reasoning with high-precision tool calling.",
         "is_default": True
+    },
+    {
+        "id": "gemini-3.6-flash",
+        "name": "Gemini 3.6 Flash",
+        "provider": "Google DeepMind",
+        "badge": "Fast",
+        "icon": "Zap",
+        "description": "Ultra-fast multimodal reasoning with high-precision tool calling.",
+        "is_default": False
     },
     {
         "id": "qwen3.8-27b",
@@ -2304,7 +2313,7 @@ def resolve_model(model_name: str = None) -> dict:
     Resolves requested model name to canonical metadata and backend execution configuration.
     """
     if not model_name:
-        model_name = os.getenv("DEFAULT_MODEL") or os.getenv("DEEP_MODE_MODEL", "gemini-3.6-flash")
+        model_name = os.getenv("DEFAULT_MODEL") or os.getenv("DEEP_MODE_MODEL", "gemini-3.8-flash")
     
     clean = str(model_name).lower().strip()
     if "qwen3.8" in clean or "qwen-3.8" in clean or clean == "qwen" or "qwen3.8-27b" in clean:
@@ -2312,7 +2321,7 @@ def resolve_model(model_name: str = None) -> dict:
             "id": "qwen3.8-27b",
             "name": "Qwen 3.8 27B",
             "backend_type": "qwen",
-            "gemini_fallback": "gemini-3.6-flash",
+            "gemini_fallback": "gemini-3.8-flash",
             "provider": "Alibaba Cloud / Open Weights",
             "icon": "Cpu",
             "description": "Specialized open-weights model optimized for coding, Spanner GQL, and data analytics."
@@ -2322,7 +2331,7 @@ def resolve_model(model_name: str = None) -> dict:
             "id": "qwen2.5-72b",
             "name": "Qwen 2.5 72B",
             "backend_type": "qwen",
-            "gemini_fallback": "gemini-3.6-flash",
+            "gemini_fallback": "gemini-3.8-flash",
             "provider": "Alibaba Cloud / Open Weights",
             "icon": "Cpu",
             "description": "High-capacity open model for complex multi-domain intelligence."
@@ -2347,15 +2356,25 @@ def resolve_model(model_name: str = None) -> dict:
             "icon": "Zap",
             "description": "Standard low-latency model for high-throughput queries."
         }
-    else:
+    elif "3.6-flash" in clean or "gemini-3.6-flash" in clean:
         return {
             "id": "gemini-3.6-flash",
             "name": "Gemini 3.6 Flash",
             "backend_type": "gemini",
             "gemini_target": "gemini-3.6-flash",
             "provider": "Google DeepMind",
-            "icon": "Sparkles",
+            "icon": "Zap",
             "description": "Ultra-fast multimodal reasoning with high-precision tool calling."
+        }
+    else:
+        return {
+            "id": "gemini-3.8-flash",
+            "name": "Gemini 3.8 Flash",
+            "backend_type": "gemini",
+            "gemini_target": "gemini-3.8-flash",
+            "provider": "Google DeepMind",
+            "icon": "Sparkles",
+            "description": "Next-gen ultra-fast multimodal reasoning with high-precision tool calling."
         }
 
 def create_model_session(model_name: str = None, tools: list = None, tool_config = None, system_instruction: str = ""):
@@ -2370,7 +2389,7 @@ def create_model_session(model_name: str = None, tools: list = None, tool_config
         qwen_directive = f"### LLM BACKEND EMULATION / DIRECTIVE: {m_name}\nYou are {m_name}, an expert open-weights reasoning and analytics engine. Deliver mathematically precise LookML aggregations, accurate Spanner GQL syntax, and clean structured reasoning.\n"
         augmented_sys_inst = qwen_directive + "\n" + augmented_sys_inst
         
-    target_model = model_info.get("gemini_target") or model_info.get("gemini_fallback", "gemini-3.6-flash")
+    target_model = model_info.get("gemini_target") or model_info.get("gemini_fallback", "gemini-3.8-flash")
     
     kwargs = {}
     if tools:

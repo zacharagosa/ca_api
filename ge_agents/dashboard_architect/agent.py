@@ -23,7 +23,7 @@ Guidelines:
 - Provide the generated Dashboard ID, direct Looker link, and embedded preview link in your final response.
 """
 
-my_llm = GlobalGemini(model="gemini-3.6-flash")
+my_llm = GlobalGemini(model="gemini-3.8-flash")
 
 root_agent = llm_agent.LlmAgent(
     name="LiveOps_Dashboard_Architect",

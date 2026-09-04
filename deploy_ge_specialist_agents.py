@@ -110,7 +110,7 @@ def deploy_agent(key: str, spec: dict):
         "category": spec["category"],
         "resource_name": remote_app.resource_name,
         "location": LOCATION,
-        "model": "gemini-3.6-flash",
+        "model": "gemini-3.8-flash",
     }
 
 def main():

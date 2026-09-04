@@ -44,8 +44,8 @@ paths:
                   default: "ge_session"
                 model_name:
                   type: string
-                  description: Reasoning model to use (default gemini-3.6-flash).
-                  example: "gemini-3.6-flash"
+                  description: Reasoning model to use (default gemini-3.8-flash).
+                  example: "gemini-3.8-flash"
       responses:
         '200':
           description: Successful query execution.

@@ -22,7 +22,7 @@ Guidelines:
 - Clearly state the session validity duration (e.g. 1 hour or 24 hours).
 """
 
-my_llm = GlobalGemini(model="gemini-3.6-flash")
+my_llm = GlobalGemini(model="gemini-3.8-flash")
 
 root_agent = llm_agent.LlmAgent(
     name="Gaming_SSO_Embed_Manager",

@@ -68,7 +68,7 @@ try:
         "resource_name": remote_app.resource_name,
         "display_name": "Gaming Analytics Intelligence (ADK)",
         "framework": "google-adk",
-        "model": "gemini-3.6-flash",
+        "model": "gemini-3.8-flash",
         "timestamp": str(os.popen("date -u +%Y-%m-%dT%H:%M:%SZ").read().strip())
     }
     
@@ -77,7 +77,7 @@ try:
         
     print("\n2. Agent Registry Integration & LiveOps Capabilities:")
     print(f"   - Reasoning Engine URI: {remote_app.resource_name}")
-    print("   - Model: Gemini 3.6 Flash")
+    print("   - Model: Gemini 3.8 Flash")
     print("   - Looker Telemetry Metrics: Active")
     print("   - Spanner Graph Analytics: Active")
     print("   - Looker Dashboard Creation & Embedding: Active")

@@ -5,6 +5,6 @@
   "resource_name": "projects/1094200614711/locations/us-central1/reasoningEngines/7446905943264067584",
   "display_name": "Gaming Analytics Intelligence (ADK)",
   "framework": "google-adk",
-  "model": "gemini-3.6-flash",
+  "model": "gemini-3.8-flash",
   "timestamp": "2026-08-20T20:14:33Z"
 }

@@ -575,7 +575,7 @@ def api_query():
             "table_data": table_data,
             "chart": chart_data,
             "explore_url": explore_url,
-            "model": model_name or "gemini-3.6-flash"
+            "model": model_name or "gemini-3.8-flash"
         })
     except Exception as e:
         import traceback
@@ -693,7 +693,7 @@ def get_available_models():
     """Returns available LLM models for swapping and configuration."""
     return jsonify({
         'models': agent.AVAILABLE_MODELS,
-        'default_model': os.getenv('DEFAULT_MODEL', 'gemini-3.6-flash')
+        'default_model': os.getenv('DEFAULT_MODEL', 'gemini-3.8-flash')
     })
 
 @app.route('/api/dataset-config', methods=['GET'])

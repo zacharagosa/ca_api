@@ -521,14 +521,25 @@ function App() {
 
   // Model Swapping State
   const [selectedModel, setSelectedModel] = useState(() => {
-    return localStorage.getItem('looker_agent_model') || 'gemini-3.6-flash';
+    const saved = localStorage.getItem('looker_agent_model');
+    if (!saved || saved === 'gemini-3.6-flash') {
+      return 'gemini-3.8-flash';
+    }
+    return saved;
   });
   const [availableModels, setAvailableModels] = useState([
+    {
+      id: "gemini-3.8-flash",
+      name: "Gemini 3.8 Flash",
+      provider: "Google DeepMind",
+      badge: "Default",
+      description: "Next-gen ultra-fast multimodal reasoning with high-precision tool calling."
+    },
     {
       id: "gemini-3.6-flash",
       name: "Gemini 3.6 Flash",
       provider: "Google DeepMind",
-      badge: "Default",
+      badge: "Fast",
       description: "Ultra-fast multimodal reasoning with high-precision tool calling."
     },
     {
@@ -569,6 +580,12 @@ function App() {
       .then(data => {
         if (data && data.models && data.models.length > 0) {
           setAvailableModels(data.models);
+          const saved = localStorage.getItem('looker_agent_model');
+          if (!saved || saved === 'gemini-3.6-flash') {
+            const def = data.default_model || 'gemini-3.8-flash';
+            setSelectedModel(def);
+            localStorage.setItem('looker_agent_model', def);
+          }
         }
       })
       .catch(err => console.log('Could not fetch models:', err));

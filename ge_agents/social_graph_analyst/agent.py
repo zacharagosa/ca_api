@@ -37,7 +37,7 @@ Guidelines:
 - Provide high-level social insights explaining network centrality or guild dynamics.
 """
 
-my_llm = GlobalGemini(model="gemini-3.6-flash")
+my_llm = GlobalGemini(model="gemini-3.8-flash")
 
 root_agent = llm_agent.LlmAgent(
     name="Gaming_Social_Graph_Intelligence",
